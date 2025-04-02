@@ -10,6 +10,8 @@
 #include <ctime>
 #include <iostream>
 
+#include "messages.hpp"
+
 namespace {
     // Helper functions to avoid namespace conflicts
     int sys_connect(int sockfd, const struct sockaddr* addr, socklen_t addrlen) {
@@ -336,8 +338,55 @@ void ControlApp::centerWindow() {
     move(x, y);
 }
 
+bool ControlApp::setMessage(stDataRecordConfigMsg& msg, bool start) {
+    msg.header.messageType = start ? 19 : 21;
+    msg.header.sequenceNumber = messageCounter++;
+    msg.header.bodyLength = sizeof(msg);
+
+    std::vector<stLoggingFile> loggingFileList;
+    stLoggingFile loggingFile;
+    loggingFile.id = 0;
+    loggingFile.enable = "true";
+    loggingFile.namePrefix = "logging";
+    loggingFile.nameSubfix = "";
+    loggingFile.extension = ".log";
+    loggingFileList.push_back(loggingFile);
+
+    stMetaData metaData;
+    metaData.data["control_app"] = "control_app";
+    metaData.issue = "control_app";
+
+    msg.loggingDirectoryPath = "/work/data/logging";
+    msg.loggingMode = 0;
+    msg.historyTime = 1;
+    msg.followTime = 1;
+    msg.splitTime = 1;
+    msg.dataLength = 1;
+    msg.loggingFileList = loggingFileList;
+    msg.metaData = metaData;
+    
+    return true;
+}
+
 bool ControlApp::sendTcpMessage(bool start) {
-    // TODO: Implement TCP message sending logic
+    stDataRecordConfigMsg msg;
+    if (!setMessage(msg, start)) {
+        return false;
+    }
+
+    std::vector<uint8_t> buffer;
+    buffer.resize(sizeof(msg));
+    std::memcpy(buffer.data(), &msg, sizeof(msg));
+
+    for (auto& backend : backends) {
+        if (backend.ready) {
+            for (int& sock : backend.sockets) {
+                if (sock >= 0) {
+                    send(sock, buffer.data(), buffer.size(), 0);
+                }
+            }
+        }
+    }
     return true;
 }
 

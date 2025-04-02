@@ -8,14 +8,19 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# Find required packages
 find_package(Qt5 COMPONENTS Widgets REQUIRED)
+find_package(Boost COMPONENTS system serialization REQUIRED)
 
 add_executable(control_app
     main.cpp
     control_app.cpp
     control_app.hpp
+    messages.hpp
 )
 
 target_link_libraries(control_app PRIVATE
     Qt5::Widgets
+    Boost::system
+    Boost::serialization
 ) 

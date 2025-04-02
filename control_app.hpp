@@ -13,6 +13,7 @@
 #include <array>
 #include <string>
 #include <memory>
+#include "messages.hpp"
 
 struct Backend {
     std::string host;
@@ -43,6 +44,7 @@ private:
     void setupUI();
     void centerWindow();
     bool sendTcpMessage(bool start = true);
+    bool setMessage(stDataRecordConfigMsg& msg, bool start);
     void cleanupSockets();
 
     std::vector<Backend> backends;
