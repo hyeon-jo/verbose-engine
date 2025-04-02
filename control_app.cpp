@@ -32,14 +32,14 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
             {9090, 9091},
             "Backend 1",
             false,
-            {-1, -1}
+            {nullptr, nullptr}
         },
         {
             "127.0.0.1",
             {9092, 9093},
             "Backend 2",
             false,
-            {-1, -1}
+            {nullptr, nullptr}
         }
     };
 
@@ -202,17 +202,16 @@ void ControlApp::connectToServer() {
         uint32_t prevCounter = messageCounter;
         try {
             // Create socket
-            auto socket = std::make_shared<tcp::socket>(*io_context);
+            backends[i].sockets[0] = std::make_shared<tcp::socket>(*io_context);
             
             // Resolve endpoint
             tcp::endpoint endpoint(to_address(backends[i].host), backends[i].ports[0]);
             
             // Connect synchronously
-            socket->connect(endpoint);
+            backends[i].sockets[0]->connect(endpoint);
 
             // Store socket
             backends[i].ready = true;
-            backends[i].sockets[0] = socket->native_handle();
             statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Connected"));
             statusLabels[i]->setStyleSheet("color: green; font-size: 32px;");
 
@@ -236,13 +235,11 @@ void ControlApp::connectToServer() {
         // Connect second sockets
         for (auto& backend : backends) {
             try {
-                auto socket = std::make_shared<tcp::socket>(*io_context);
+                backend.sockets[1] = std::make_shared<tcp::socket>(*io_context);
                 tcp::endpoint endpoint(to_address(backend.host), backend.ports[1]);
                 
                 // Connect synchronously
-                socket->connect(endpoint);
-                
-                backend.sockets[1] = socket->native_handle();
+                backend.sockets[1]->connect(endpoint);
             } catch (const std::exception& e) {
                 std::cerr << "Error connecting to second port: " << e.what() << std::endl;
             }
@@ -368,17 +365,13 @@ bool ControlApp::sendTcpMessage(bool start) {
 
     for (auto& backend : backends) {
         if (backend.ready) {
-            for (int& sock : backend.sockets) {
-                if (sock >= 0) {
+            for (auto& socket : backend.sockets) {
+                if (socket && socket->is_open()) {
                     try {
-                        // Reuse existing socket
-                        boost::asio::ip::tcp::socket socket(*io_context);
-                        socket.assign(boost::asio::ip::tcp::v4(), sock);
-                        boost::asio::write(socket, boost::asio::buffer(buffer));
+                        boost::asio::write(*socket, boost::asio::buffer(buffer));
                     } catch (const std::exception& e) {
                         std::cerr << "Error sending message: " << e.what() << std::endl;
-                        // If send fails, mark socket as invalid
-                        sock = -1;
+                        socket = nullptr;
                         return false;
                     }
                 }
@@ -390,16 +383,14 @@ bool ControlApp::sendTcpMessage(bool start) {
 
 void ControlApp::cleanupSockets() {
     for (auto& backend : backends) {
-        for (int& sock : backend.sockets) {
-            if (sock >= 0) {
+        for (auto& socket : backend.sockets) {
+            if (socket && socket->is_open()) {
                 try {
-                    boost::asio::ip::tcp::socket socket(*io_context);
-                    socket.assign(boost::asio::ip::tcp::v4(), sock);
-                    socket.close();
+                    socket->close();
                 } catch (const std::exception& e) {
                     std::cerr << "Error closing socket: " << e.what() << std::endl;
                 }
-                sock = -1;
+                socket = nullptr;
             }
         }
         backend.ready = false;

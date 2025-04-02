@@ -21,7 +21,7 @@ struct Backend {
     std::array<int, 2> ports;
     std::string name;
     bool ready;
-    std::array<int, 2> sockets;  // File descriptors for sockets
+    std::array<std::shared_ptr<boost::asio::ip::tcp::socket>, 2> sockets;  // Store socket objects
 };
 
 class ControlApp : public QMainWindow {
