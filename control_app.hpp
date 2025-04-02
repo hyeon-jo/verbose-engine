@@ -13,6 +13,7 @@
 #include <array>
 #include <string>
 #include <memory>
+#include <boost/asio.hpp>
 #include "messages.hpp"
 
 struct Backend {
@@ -55,6 +56,7 @@ private:
     QPushButton* applyBtn;
     QTimer* timer;
     QTimer* statusTimer;
+    std::shared_ptr<boost::asio::io_context> io_context;
 
     bool isToggleOn;
     bool eventSent;

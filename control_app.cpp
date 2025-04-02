@@ -2,29 +2,28 @@
 #include <QApplication>
 #include <QDesktopWidget>
 #include <QMessageBox>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
+#include <boost/asio.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/system/error_code.hpp>
 #include <chrono>
 #include <ctime>
 #include <iostream>
 
 #include "messages.hpp"
 
-namespace {
-    // Helper functions to avoid namespace conflicts
-    int sys_connect(int sockfd, const struct sockaddr* addr, socklen_t addrlen) {
-        return ::connect(sockfd, addr, addrlen);
-    }
+using boost::asio::ip::tcp;
+using boost::system::error_code;
 
-    int sys_close(int fd) {
-        return ::close(fd);
+namespace {
+    // Helper function to convert string to boost::asio::ip::address
+    boost::asio::ip::address to_address(const std::string& host) {
+        return boost::asio::ip::make_address(host);
     }
 }
 
 ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent), 
-    isToggleOn(false), eventSent(false), messageCounter(0) {
+    isToggleOn(false), eventSent(false), messageCounter(0),
+    io_context(std::make_shared<boost::asio::io_context>()) {
     
     // Initialize backends
     backends = {
@@ -202,27 +201,18 @@ void ControlApp::connectToServer() {
     for (size_t i = 0; i < backends.size(); ++i) {
         uint32_t prevCounter = messageCounter;
         try {
-            int sock = socket(AF_INET, SOCK_STREAM, 0);
-            if (sock < 0) {
-                throw std::runtime_error("Socket creation failed");
-            }
+            // Create socket
+            auto socket = std::make_shared<tcp::socket>(*io_context);
+            
+            // Resolve endpoint
+            tcp::endpoint endpoint(to_address(backends[i].host), backends[i].ports[0]);
+            
+            // Connect synchronously
+            socket->connect(endpoint);
 
-            struct sockaddr_in serverAddr;
-            serverAddr.sin_family = AF_INET;
-            serverAddr.sin_port = htons(backends[i].ports[0]);
-            if (inet_pton(AF_INET, backends[i].host.c_str(), &serverAddr.sin_addr) <= 0) {
-                sys_close(sock);
-                throw std::runtime_error("Invalid address");
-            }
-
-            if (sys_connect(sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-                sys_close(sock);
-                throw std::runtime_error("Connection failed");
-            }
-
-            // Handle connection protocol here...
+            // Store socket
             backends[i].ready = true;
-            backends[i].sockets[0] = sock;
+            backends[i].sockets[0] = socket->native_handle();
             statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Connected"));
             statusLabels[i]->setStyleSheet("color: green; font-size: 32px;");
 
@@ -245,18 +235,16 @@ void ControlApp::connectToServer() {
 
         // Connect second sockets
         for (auto& backend : backends) {
-            int sock = socket(AF_INET, SOCK_STREAM, 0);
-            if (sock >= 0) {
-                struct sockaddr_in serverAddr;
-                serverAddr.sin_family = AF_INET;
-                serverAddr.sin_port = htons(backend.ports[1]);
-                if (inet_pton(AF_INET, backend.host.c_str(), &serverAddr.sin_addr) > 0) {
-                    if (sys_connect(sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) >= 0) {
-                        backend.sockets[1] = sock;
-                        continue;
-                    }
-                }
-                sys_close(sock);
+            try {
+                auto socket = std::make_shared<tcp::socket>(*io_context);
+                tcp::endpoint endpoint(to_address(backend.host), backend.ports[1]);
+                
+                // Connect synchronously
+                socket->connect(endpoint);
+                
+                backend.sockets[1] = socket->native_handle();
+            } catch (const std::exception& e) {
+                std::cerr << "Error connecting to second port: " << e.what() << std::endl;
             }
         }
         std::cout << "All backends connected successfully" << std::endl;
@@ -382,7 +370,17 @@ bool ControlApp::sendTcpMessage(bool start) {
         if (backend.ready) {
             for (int& sock : backend.sockets) {
                 if (sock >= 0) {
-                    send(sock, buffer.data(), buffer.size(), 0);
+                    try {
+                        // Reuse existing socket
+                        boost::asio::ip::tcp::socket socket(*io_context);
+                        socket.assign(boost::asio::ip::tcp::v4(), sock);
+                        boost::asio::write(socket, boost::asio::buffer(buffer));
+                    } catch (const std::exception& e) {
+                        std::cerr << "Error sending message: " << e.what() << std::endl;
+                        // If send fails, mark socket as invalid
+                        sock = -1;
+                        return false;
+                    }
                 }
             }
         }
@@ -394,7 +392,13 @@ void ControlApp::cleanupSockets() {
     for (auto& backend : backends) {
         for (int& sock : backend.sockets) {
             if (sock >= 0) {
-                sys_close(sock);
+                try {
+                    boost::asio::ip::tcp::socket socket(*io_context);
+                    socket.assign(boost::asio::ip::tcp::v4(), sock);
+                    socket.close();
+                } catch (const std::exception& e) {
+                    std::cerr << "Error closing socket: " << e.what() << std::endl;
+                }
                 sock = -1;
             }
         }
