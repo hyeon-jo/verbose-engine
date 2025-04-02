@@ -29,14 +29,14 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
     // Initialize backends
     backends = {
         {
-            "localhost",
+            "127.0.0.1",
             {9090, 9091},
             "Backend 1",
             false,
             {-1, -1}
         },
         {
-            "localhost",
+            "127.0.0.1",
             {9092, 9093},
             "Backend 2",
             false,
