@@ -242,7 +242,7 @@ void ControlApp::connectToServer() {
                 
                 // Connect synchronously
                 backend.sockets[1]->connect(endpoint);
-                sendTcpMessage(MessageType::configInfo);
+                sendTcpMessage(MessageType::configInfo, backend);
             } catch (const std::exception& e) {
                 std::cerr << "Error connecting to second port: " << e.what() << std::endl;
             }
@@ -270,7 +270,11 @@ void ControlApp::applyConfiguration() {
 
 void ControlApp::toggleAction() {
     if (!isToggleOn) {  // Sending START
-        if (sendTcpMessage(MessageType::start)) {
+        std::vector<bool> results;
+        for (auto& backend : backends) {
+            results.push_back(sendTcpMessage(MessageType::start, backend));
+        }
+        if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("End");
             toggleBtn->setStyleSheet(
                 "QPushButton {"
@@ -288,8 +292,19 @@ void ControlApp::toggleAction() {
             isToggleOn = true;
             eventBtn->setEnabled(false);
         }
+        else {
+            for (int i = 0; i < results.size(); i++) {
+                if (results[i]) {
+                    sendTcpMessage(MessageType::stop, backends[i]);
+                }
+            }
+        }
     } else {  // Sending END
-        if (sendTcpMessage(MessageType::stop)) {
+        std::vector<bool> results;
+        for (auto& backend : backends) {
+            results.push_back(sendTcpMessage(MessageType::stop, backend));
+        }
+        if (sendTcpMessage(MessageType::stop, backends[0])) {
             toggleBtn->setText("Start");
             toggleBtn->setStyleSheet(
                 "QPushButton {"
@@ -306,6 +321,13 @@ void ControlApp::toggleAction() {
             );
             isToggleOn = false;
             eventBtn->setEnabled(true);
+        }
+        else {
+            for (int i = 0; i < results.size(); i++) {
+                if (!results[i]) {
+                    sendTcpMessage(MessageType::stop, backends[i]);
+                }
+            }
         }
     }
 }
@@ -359,7 +381,7 @@ bool ControlApp::setMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
     return true;
 }
 
-bool ControlApp::sendTcpMessage(uint8_t messageType) {
+bool ControlApp::sendTcpMessage(uint8_t messageType, Backend& backend) {
     stDataRecordConfigMsg msg;
     if (!setMessage(msg, messageType)) {
         return false;
@@ -382,45 +404,43 @@ bool ControlApp::sendTcpMessage(uint8_t messageType) {
     std::cout << "Outbound header: " << outbound_header_ << std::endl;
     std::cout << "Outbound data: " << outbound_data_ << std::endl;
 
-    for (auto& backend : backends) {
-        if (backend.ready && backend.sockets[1]->is_open()) {
-            auto& socket = backend.sockets[1];
-            try {
-                // Get executor from socket
-                auto executor = socket->get_executor();
-                        
-                    // Create completion handler
-                    auto handler = [](const boost::system::error_code& error, std::size_t bytes_transferred) {
-                        if (error) {
-                            std::cerr << "Async write error: " << error.message() << std::endl;
-                        } else {
-                            std::cout << "Async write completed: " << bytes_transferred << " bytes" << std::endl;
-                        }
-                    };
+    if (backend.ready && backend.sockets[1]->is_open()) {
+        auto& socket = backend.sockets[1];
+        try {
+            // Get executor from socket
+            auto executor = socket->get_executor();
+                    
+                // Create completion handler
+                auto handler = [](const boost::system::error_code& error, std::size_t bytes_transferred) {
+                    if (error) {
+                        std::cerr << "Async write error: " << error.message() << std::endl;
+                    } else {
+                        std::cout << "Async write completed: " << bytes_transferred << " bytes" << std::endl;
+                    }
+                };
 
-                    // Start async write
-                    boost::asio::async_write(*socket, 
-                        boost::asio::buffer(outbound_header_),
-                        boost::asio::bind_executor(executor, handler));
+                // Start async write
+                boost::asio::async_write(*socket, 
+                    boost::asio::buffer(outbound_header_),
+                    boost::asio::bind_executor(executor, handler));
 
-                    boost::asio::async_write(*socket, 
-                        boost::asio::buffer(outbound_data_),
-                        boost::asio::bind_executor(executor, handler));
+                boost::asio::async_write(*socket, 
+                    boost::asio::buffer(outbound_data_),
+                    boost::asio::bind_executor(executor, handler));
 
-            } catch (const std::exception& e) {
-                std::cerr << "Error sending message: " << e.what() << std::endl;
-                socket = nullptr;
-                return false;
-            }
-        }
-        else if (backend.ready) {
-            std::cerr << "Socket is closed" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Error sending message: " << e.what() << std::endl;
+            socket = nullptr;
             return false;
         }
-        else {
-            std::cerr << "Backend is not ready" << std::endl;
-            return false;
-        }
+    }
+    else if (backend.ready) {
+        std::cerr << "Socket is closed" << std::endl;
+        return false;
+    }
+    else {
+        std::cerr << "Backend is not ready" << std::endl;
+        return false;
     }
     return true;
 }
