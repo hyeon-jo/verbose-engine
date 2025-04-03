@@ -270,7 +270,7 @@ void ControlApp::applyConfiguration() {
 
 void ControlApp::toggleAction() {
     if (!isToggleOn) {  // Sending START
-        if (sendTcpMessage(true)) {
+        if (sendTcpMessage(MessageType::start)) {
             toggleBtn->setText("End");
             toggleBtn->setStyleSheet(
                 "QPushButton {"
@@ -289,7 +289,7 @@ void ControlApp::toggleAction() {
             eventBtn->setEnabled(false);
         }
     } else {  // Sending END
-        if (sendTcpMessage(false)) {
+        if (sendTcpMessage(MessageType::stop)) {
             toggleBtn->setText("Start");
             toggleBtn->setStyleSheet(
                 "QPushButton {"
@@ -370,56 +370,56 @@ bool ControlApp::sendTcpMessage(uint8_t messageType) {
     archive << msg;
 
     std::string outbound_data_ = archive_stream.str();
-    std::string outbound_header_ = std::to_string(outbound_data_.size());
-    outbound_header_.resize(8, ' ');
+    std::ostringstream header_stream;
+    header_stream << std::setw(header_length) << std::hex << outbound_data_.size();
 
-    // Log message sizes
-    std::cout << "Header size: " << outbound_header_.size() << " bytes" << std::endl;
-    std::cout << "Data size: " << outbound_data_.size() << " bytes" << std::endl;
-    std::cout << "Total size: " << (outbound_header_.size() + outbound_data_.size()) << " bytes" << std::endl;
-
-    // Check header size
-    if (outbound_header_.size() != 8) {
-        std::cerr << "Error: Header size is " << outbound_header_.size() 
-                  << ", expected 8 bytes" << std::endl;
+    if (!header_stream || header_stream.str().size() != header_length) {
+        std::cerr << "Incorrect header length" << std::endl;
         return false;
     }
+    std::string outbound_header_ = header_stream.str();
+
+    std::cout << "Outbound header: " << outbound_header_ << std::endl;
+    std::cout << "Outbound data: " << outbound_data_ << std::endl;
 
     std::vector<boost::asio::const_buffer> buffers;
     buffers.push_back(boost::asio::buffer(outbound_header_));
     buffers.push_back(boost::asio::buffer(outbound_data_));
 
     for (auto& backend : backends) {
-        if (backend.ready) {
-            for (auto& socket : backend.sockets) {
-                if (socket && socket->is_open()) {
-                    try {
-                        // Get executor from socket
-                        auto executor = socket->get_executor();
+        if (backend.ready && backend.sockets[1]->is_open()) {
+            auto& socket = backend.sockets[1];
+            try {
+                // Get executor from socket
+                auto executor = socket->get_executor();
                         
-                        // Create completion handler
-                        auto handler = [](const boost::system::error_code& error, std::size_t bytes_transferred) {
-                            if (error) {
-                                std::cerr << "Async write error: " << error.message() << std::endl;
-                            } else {
-                                std::cout << "Async write completed: " << bytes_transferred << " bytes" << std::endl;
-                            }
-                        };
+                    // Create completion handler
+                    auto handler = [](const boost::system::error_code& error, std::size_t bytes_transferred) {
+                        if (error) {
+                            std::cerr << "Async write error: " << error.message() << std::endl;
+                        } else {
+                            std::cout << "Async write completed: " << bytes_transferred << " bytes" << std::endl;
+                        }
+                    };
 
-                        // Start async write
-                        boost::asio::async_write(*socket, 
-                            boost::asio::buffer(buffers),
-                            boost::asio::bind_executor(executor, handler));
+                    // Start async write
+                    boost::asio::async_write(*socket, 
+                        boost::asio::buffer(buffers),
+                        boost::asio::bind_executor(executor, handler));
 
-                        // Run the io_context to process the async operation
-                        io_context->run_one();
-                    } catch (const std::exception& e) {
-                        std::cerr << "Error sending message: " << e.what() << std::endl;
-                        socket = nullptr;
-                        return false;
-                    }
-                }
+            } catch (const std::exception& e) {
+                std::cerr << "Error sending message: " << e.what() << std::endl;
+                socket = nullptr;
+                return false;
             }
+        }
+        else if (backend.ready) {
+            std::cerr << "Socket is closed" << std::endl;
+            return false;
+        }
+        else {
+            std::cerr << "Backend is not ready" << std::endl;
+            return false;
         }
     }
     return true;

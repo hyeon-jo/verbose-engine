@@ -16,6 +16,8 @@
 #include <boost/asio.hpp>
 #include "messages.hpp"
 
+enum { header_length = 8 };
+
 enum MessageType : uint8_t {
     start = 19,
     stop = 24,
