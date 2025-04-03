@@ -382,10 +382,6 @@ bool ControlApp::sendTcpMessage(uint8_t messageType) {
     std::cout << "Outbound header: " << outbound_header_ << std::endl;
     std::cout << "Outbound data: " << outbound_data_ << std::endl;
 
-    std::vector<boost::asio::const_buffer> buffers;
-    buffers.push_back(boost::asio::buffer(outbound_header_));
-    buffers.push_back(boost::asio::buffer(outbound_data_));
-
     for (auto& backend : backends) {
         if (backend.ready && backend.sockets[1]->is_open()) {
             auto& socket = backend.sockets[1];
@@ -404,7 +400,11 @@ bool ControlApp::sendTcpMessage(uint8_t messageType) {
 
                     // Start async write
                     boost::asio::async_write(*socket, 
-                        boost::asio::buffer(buffers),
+                        boost::asio::buffer(outbound_header_),
+                        boost::asio::bind_executor(executor, handler));
+
+                    boost::asio::async_write(*socket, 
+                        boost::asio::buffer(outbound_data_),
                         boost::asio::bind_executor(executor, handler));
 
             } catch (const std::exception& e) {
