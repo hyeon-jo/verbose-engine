@@ -5,6 +5,8 @@
 #include <boost/asio.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <iomanip>
 #include <chrono>
 #include <ctime>
 #include <iostream>
@@ -359,16 +361,49 @@ bool ControlApp::sendTcpMessage(bool start) {
         return false;
     }
 
-    std::vector<uint8_t> buffer;
-    buffer.resize(sizeof(msg));
-    std::memcpy(buffer.data(), &msg, sizeof(msg));
+    std::ostringstream archive_stream;
+    boost::archive::text_oarchive archive(archive_stream);
+    archive << msg;
+
+    std::string outbound_data_ = archive_stream.str();
+
+    std::ostringstream header_stream;
+    header_stream << std::setw(8) << outbound_data_.size();
+    if (!header_stream || header_stream.str().size() != 8) {
+        std::cerr << "Failed to format header" << std::endl;
+        return false;
+    }
+
+    std::string outbound_header_ = header_stream.str();
+
+    std::vector<boost::asio::const_buffer> buffers;
+    buffers.push_back(boost::asio::buffer(outbound_header_));
+    buffers.push_back(boost::asio::buffer(outbound_data_));
 
     for (auto& backend : backends) {
         if (backend.ready) {
             for (auto& socket : backend.sockets) {
                 if (socket && socket->is_open()) {
                     try {
-                        boost::asio::write(*socket, boost::asio::buffer(buffer));
+                        // Get executor from socket
+                        auto executor = socket->get_executor();
+                        
+                        // Create completion handler
+                        auto handler = [](const boost::system::error_code& error, std::size_t bytes_transferred) {
+                            if (error) {
+                                std::cerr << "Async write error: " << error.message() << std::endl;
+                            } else {
+                                std::cout << "Async write completed: " << bytes_transferred << " bytes" << std::endl;
+                            }
+                        };
+
+                        // Start async write
+                        boost::asio::async_write(*socket, 
+                            boost::asio::buffer(buffers),
+                            boost::asio::bind_executor(executor, handler));
+
+                        // Run the io_context to process the async operation
+                        io_context->run_one();
                     } catch (const std::exception& e) {
                         std::cerr << "Error sending message: " << e.what() << std::endl;
                         socket = nullptr;

@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.1.0)
+cmake_minimum_required(VERSION 3.16)
 
-project(control_app)
+project(control_app VERSION 1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,8 +9,9 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Find required packages
-find_package(Qt5 COMPONENTS Widgets REQUIRED)
-find_package(Boost COMPONENTS system REQUIRED)
+find_package(Qt5 COMPONENTS Core Widgets REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system serialization)
+find_package(Threads REQUIRED)
 
 add_executable(control_app
     main.cpp
@@ -20,7 +21,10 @@ add_executable(control_app
 )
 
 target_link_libraries(control_app PRIVATE
+    Qt5::Core
     Qt5::Widgets
     Boost::system
+    Boost::serialization
+    Threads::Threads
     pthread
 ) 
