@@ -52,7 +52,7 @@ private slots:
 private:
     void setupUI();
     void centerWindow();
-    bool sendTcpMessage(uint8_t messageType);
+    bool sendTcpMessage(uint8_t messageType, Backend& backend);
     bool setMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
     void cleanupSockets();
 
