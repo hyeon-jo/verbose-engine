@@ -16,6 +16,12 @@
 #include <boost/asio.hpp>
 #include "messages.hpp"
 
+enum MessageType : uint8_t {
+    start = 19,
+    stop = 24,
+    configInfo = 26,
+};
+
 struct Backend {
     std::string host;
     std::array<int, 2> ports;
@@ -44,8 +50,8 @@ private slots:
 private:
     void setupUI();
     void centerWindow();
-    bool sendTcpMessage(bool start = true);
-    bool setMessage(stDataRecordConfigMsg& msg, bool start);
+    bool sendTcpMessage(uint8_t messageType);
+    bool setMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
     void cleanupSockets();
 
     std::vector<Backend> backends;

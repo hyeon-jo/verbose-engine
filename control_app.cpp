@@ -242,6 +242,7 @@ void ControlApp::connectToServer() {
                 
                 // Connect synchronously
                 backend.sockets[1]->connect(endpoint);
+                sendTcpMessage(MessageType::configInfo);
             } catch (const std::exception& e) {
                 std::cerr << "Error connecting to second port: " << e.what() << std::endl;
             }
@@ -325,8 +326,11 @@ void ControlApp::centerWindow() {
     move(x, y);
 }
 
-bool ControlApp::setMessage(stDataRecordConfigMsg& msg, bool start) {
-    msg.header.messageType = start ? 19 : 21;
+bool ControlApp::setMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
+    msg.header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+    msg.header.messageType = messageType;
     msg.header.sequenceNumber = messageCounter++;
     msg.header.bodyLength = sizeof(msg);
 
@@ -355,9 +359,9 @@ bool ControlApp::setMessage(stDataRecordConfigMsg& msg, bool start) {
     return true;
 }
 
-bool ControlApp::sendTcpMessage(bool start) {
+bool ControlApp::sendTcpMessage(uint8_t messageType) {
     stDataRecordConfigMsg msg;
-    if (!setMessage(msg, start)) {
+    if (!setMessage(msg, messageType)) {
         return false;
     }
 
@@ -366,15 +370,20 @@ bool ControlApp::sendTcpMessage(bool start) {
     archive << msg;
 
     std::string outbound_data_ = archive_stream.str();
+    std::string outbound_header_ = std::to_string(outbound_data_.size());
+    outbound_header_.resize(8, ' ');
 
-    std::ostringstream header_stream;
-    header_stream << std::setw(8) << outbound_data_.size();
-    if (!header_stream || header_stream.str().size() != 8) {
-        std::cerr << "Failed to format header" << std::endl;
+    // Log message sizes
+    std::cout << "Header size: " << outbound_header_.size() << " bytes" << std::endl;
+    std::cout << "Data size: " << outbound_data_.size() << " bytes" << std::endl;
+    std::cout << "Total size: " << (outbound_header_.size() + outbound_data_.size()) << " bytes" << std::endl;
+
+    // Check header size
+    if (outbound_header_.size() != 8) {
+        std::cerr << "Error: Header size is " << outbound_header_.size() 
+                  << ", expected 8 bytes" << std::endl;
         return false;
     }
-
-    std::string outbound_header_ = header_stream.str();
 
     std::vector<boost::asio::const_buffer> buffers;
     buffers.push_back(boost::asio::buffer(outbound_header_));

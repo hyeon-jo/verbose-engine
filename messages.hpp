@@ -10,30 +10,6 @@
 #include <boost/serialization/base_object.hpp>
 #include <thread>
 
-class [[gnu::packed]] Protocol_Header 
-{
-    public:
-        Protocol_Header();
-
-        Protocol_Header(
-            uint8_t const messageType,
-            uint64_t const sequenceNumber,
-            uint32_t const bodyLength
-        );
-
-        ~Protocol_Header() = default;
-
-        uint64_t timestamp;
-        uint8_t messageType;
-        uint64_t sequenceNumber;
-        uint32_t bodyLength;      
-};
-
-struct stLoggingMsg
-{
-    Protocol_Header header;
-    uint8_t* pData;
-};
 
 struct Header
 {
