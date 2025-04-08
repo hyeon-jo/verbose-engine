@@ -30,15 +30,15 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
     // Initialize backends
     backends = {
         {
-            "127.0.0.1",
+            "192.168.10.10",
             {9090, 9091},
             "Backend 1",
             false,
             {nullptr, nullptr}
         },
         {
-            "127.0.0.1",
-            {9092, 9093},
+            "192.168.10.20",
+            {9090, 9091},
             "Backend 2",
             false,
             {nullptr, nullptr}
@@ -235,6 +235,7 @@ void ControlApp::connectToServer() {
         toggleBtn->setEnabled(true);
 
         // Connect second sockets
+        int idx = 0;
         for (auto& backend : backends) {
             try {
                 backend.sockets[1] = std::make_shared<tcp::socket>(*io_context);
@@ -242,7 +243,7 @@ void ControlApp::connectToServer() {
                 
                 // Connect synchronously
                 backend.sockets[1]->connect(endpoint);
-                sendTcpMessage(MessageType::configInfo, backend);
+                sendTcpMessage(MessageType::configInfo, backend, idx++);
             } catch (const std::exception& e) {
                 std::cerr << "Error connecting to second port: " << e.what() << std::endl;
             }
@@ -271,8 +272,9 @@ void ControlApp::applyConfiguration() {
 void ControlApp::toggleAction() {
     if (!isToggleOn) {  // Sending START
         std::vector<bool> results;
+        int idx = 0;
         for (auto& backend : backends) {
-            results.push_back(sendTcpMessage(MessageType::start, backend));
+            results.push_back(sendTcpMessage(MessageType::start, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("End");
@@ -295,16 +297,17 @@ void ControlApp::toggleAction() {
         else {
             for (int i = 0; i < results.size(); i++) {
                 if (results[i]) {
-                    sendTcpMessage(MessageType::stop, backends[i]);
+                    sendTcpMessage(MessageType::stop, backends[i], i);
                 }
             }
         }
     } else {  // Sending END
         std::vector<bool> results;
+        int idx = 0;
         for (auto& backend : backends) {
-            results.push_back(sendTcpMessage(MessageType::stop, backend));
+            results.push_back(sendTcpMessage(MessageType::stop, backend, idx++));
         }
-        if (sendTcpMessage(MessageType::stop, backends[0])) {
+        if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("Start");
             toggleBtn->setStyleSheet(
                 "QPushButton {"
@@ -325,7 +328,7 @@ void ControlApp::toggleAction() {
         else {
             for (int i = 0; i < results.size(); i++) {
                 if (!results[i]) {
-                    sendTcpMessage(MessageType::stop, backends[i]);
+                    sendTcpMessage(MessageType::stop, backends[i], i);
                 }
             }
         }
@@ -333,7 +336,20 @@ void ControlApp::toggleAction() {
 }
 
 void ControlApp::sendEvent() {
-    // TODO: Implement event sending logic
+    std::vector<bool> results;
+    int idx = 0;
+    QTimer::singleShot(30000, [this, &results, &idx]() {
+        for (auto& backend : backends) {
+            results.push_back(sendTcpMessage(MessageType::event, backend, idx++));
+        }
+        if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
+            eventBtn->setEnabled(false);
+        }
+        else {
+            // pass
+        }
+    });
+    eventBtn->setEnabled(true);
 }
 
 void ControlApp::enableEventButton() {
@@ -369,7 +385,7 @@ bool ControlApp::setMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
     metaData.data["control_app"] = "control_app";
     metaData.issue = "control_app";
 
-    msg.loggingDirectoryPath = "/work/data/logging";
+    msg.loggingDirectoryPath = "/home/nvidia/Work/data/logging";
     msg.loggingMode = 0;
     msg.historyTime = 1;
     msg.followTime = 1;
@@ -381,7 +397,7 @@ bool ControlApp::setMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
     return true;
 }
 
-bool ControlApp::sendTcpMessage(uint8_t messageType, Backend& backend) {
+bool ControlApp::sendTcpMessage(uint8_t messageType, Backend& backend, int idx) {
     stDataRecordConfigMsg msg;
     if (!setMessage(msg, messageType)) {
         return false;
@@ -411,9 +427,11 @@ bool ControlApp::sendTcpMessage(uint8_t messageType, Backend& backend) {
             auto executor = socket->get_executor();
                     
                 // Create completion handler
-                auto handler = [](const boost::system::error_code& error, std::size_t bytes_transferred) {
+                auto handler = [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
                     if (error) {
                         std::cerr << "Async write error: " << error.message() << std::endl;
+                        statusLabels[idx]->setText(QString::fromStdString(backend.name + ": Not Connected"));
+                        statusLabels[idx]->setStyleSheet("color: red; font-size: 32px;");
                     } else {
                         std::cout << "Async write completed: " << bytes_transferred << " bytes" << std::endl;
                     }
@@ -436,6 +454,10 @@ bool ControlApp::sendTcpMessage(uint8_t messageType, Backend& backend) {
     }
     else if (backend.ready) {
         std::cerr << "Socket is closed" << std::endl;
+        backend.ready = false;
+        statusLabels[idx]->setText(QString::fromStdString(backend.name + ": Not Connected"));
+        statusLabels[idx]->setStyleSheet("color: red; font-size: 32px;");
+        
         return false;
     }
     else {
