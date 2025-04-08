@@ -20,6 +20,7 @@ enum { header_length = 8 };
 
 enum MessageType : uint8_t {
     start = 19,
+    event = 20,
     stop = 24,
     configInfo = 26,
 };
@@ -52,12 +53,14 @@ private slots:
 private:
     void setupUI();
     void centerWindow();
-    bool sendTcpMessage(uint8_t messageType, Backend& backend);
+    bool sendTcpMessage(uint8_t messageType, Backend& backend, int idx);
     bool setMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
     void cleanupSockets();
 
     std::vector<Backend> backends;
     std::vector<QLineEdit*> ipInputs;
+    std::vector<QLineEdit*> portInputs1;
+    std::vector<QLineEdit*> portInputs2;
     std::vector<QLabel*> statusLabels;
     QPushButton* toggleBtn;
     QPushButton* eventBtn;

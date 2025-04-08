@@ -53,7 +53,7 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
 
     statusTimer = new QTimer(this);
     QObject::connect(statusTimer, &QTimer::timeout, this, &ControlApp::connectToServer);
-    statusTimer->start(1000);  // Check every 1 second
+    statusTimer->start(5000);  // Check every 5 seconds
 }
 
 ControlApp::~ControlApp() {
@@ -79,17 +79,62 @@ void ControlApp::setupUI() {
         
         QLineEdit* ipInput = new QLineEdit(QString::fromStdString(backends[i].host), this);
         ipInput->setPlaceholderText("Enter IP address");
-        ipInput->setStyleSheet("font-size: 32px; padding: 5px;");
+        ipInput->setStyleSheet(
+            "QLineEdit {"
+            "    font-size: 32px;"
+            "    padding: 5px;"
+            "    border: 1px solid #999;"
+            "    border-radius: 3px;"
+            "}"
+            "QLineEdit:focus {"
+            "    border: 2px solid #008CBA;"
+            "}"
+        );
+        
+        QLabel* portLabel1 = new QLabel("Port 1:", this);
+        portLabel1->setStyleSheet("font-size: 32px;");
+        
+        QLineEdit* portInput1 = new QLineEdit(QString::number(backends[i].ports[0]), this);
+        portInput1->setPlaceholderText("Enter port 1");
+        portInput1->setStyleSheet(
+            "QLineEdit {"
+            "    font-size: 32px;"
+            "    padding: 5px;"
+            "    border: 1px solid #999;"
+            "    border-radius: 3px;"
+            "}"
+            "QLineEdit:focus {"
+            "    border: 2px solid #008CBA;"
+            "}"
+        );
+        
+        QLabel* portLabel2 = new QLabel("Port 2:", this);
+        portLabel2->setStyleSheet("font-size: 32px;");
+        
+        QLineEdit* portInput2 = new QLineEdit(QString::number(backends[i].ports[1]), this);
+        portInput2->setPlaceholderText("Enter port 2");
+        portInput2->setStyleSheet(
+            "QLineEdit {"
+            "    font-size: 32px;"
+            "    padding: 5px;"
+            "    border: 1px solid #999;"
+            "    border-radius: 3px;"
+            "}"
+            "QLineEdit:focus {"
+            "    border: 2px solid #008CBA;"
+            "}"
+        );
         
         configLayout->addWidget(ipLabel, i, 0);
         configLayout->addWidget(ipInput, i, 1);
+        configLayout->addWidget(portLabel1, i, 2);
+        configLayout->addWidget(portInput1, i, 3);
+        configLayout->addWidget(portLabel2, i, 4);
+        configLayout->addWidget(portInput2, i, 5);
+        
         ipInputs.push_back(ipInput);
-
-        QLabel* portLabel = new QLabel(QString("Ports: %1, %2")
-            .arg(backends[i].ports[0])
-            .arg(backends[i].ports[1]), this);
-        portLabel->setStyleSheet("font-size: 32px;");
-        configLayout->addWidget(portLabel, i, 2);
+        portInputs1.push_back(portInput1);
+        portInputs2.push_back(portInput2);
     }
 
     // Add apply button
@@ -109,7 +154,7 @@ void ControlApp::setupUI() {
         "}"
     );
     connect(applyBtn, &QPushButton::clicked, this, &ControlApp::applyConfiguration);
-    configLayout->addWidget(applyBtn, backends.size(), 0, 1, 4);
+    configLayout->addWidget(applyBtn, backends.size(), 0, 1, 6);
 
     configGroup->setLayout(configLayout);
     mainLayout->addWidget(configGroup);
@@ -253,18 +298,60 @@ void ControlApp::connectToServer() {
 }
 
 void ControlApp::applyConfiguration() {
+    bool allValid = true;
+    std::string errorMessage;
+
     for (size_t i = 0; i < backends.size(); ++i) {
         QString ip = ipInputs[i]->text().trimmed();
-        if (ip.isEmpty()) {
-            QMessageBox::warning(this, "Configuration Error", 
-                QString::fromStdString(backends[i].name + ": IP address cannot be empty"));
-            return;
-        }
+        QString port1 = portInputs1[i]->text().trimmed();
+        QString port2 = portInputs2[i]->text().trimmed();
         
+        // Check if IP is empty
+        if (ip.isEmpty()) {
+            errorMessage = backends[i].name + ": IP address cannot be empty";
+            allValid = false;
+            break;
+        }
+
+        // Validate IP format
+        QRegExp ipRegex("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$");
+        if (!ipRegex.exactMatch(ip)) {
+            errorMessage = backends[i].name + ": Invalid IP address format";
+            allValid = false;
+            break;
+        }
+
+        // Validate ports
+        bool ok1, ok2;
+        int portNum1 = port1.toInt(&ok1);
+        int portNum2 = port2.toInt(&ok2);
+        
+        if (!ok1 || !ok2 || portNum1 < 1 || portNum1 > 65535 || portNum2 < 1 || portNum2 > 65535) {
+            errorMessage = backends[i].name + ": Invalid port number (must be between 1 and 65535)";
+            allValid = false;
+            break;
+        }
+
+        // Check if configuration has changed
+        if (ip.toStdString() == backends[i].host && 
+            portNum1 == backends[i].ports[0] && 
+            portNum2 == backends[i].ports[1]) {
+            continue;  // Skip if configuration hasn't changed
+        }
+
+        // Update configuration
         backends[i].host = ip.toStdString();
+        backends[i].ports[0] = portNum1;
+        backends[i].ports[1] = portNum2;
         cleanupSockets();
     }
-    
+
+    if (!allValid) {
+        QMessageBox::warning(this, "Configuration Error", QString::fromStdString(errorMessage));
+        return;
+    }
+
+    // Reconnect to servers with new configuration
     connectToServer();
     QMessageBox::information(this, "Success", "Configuration applied successfully");
 }
