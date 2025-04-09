@@ -53,7 +53,7 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
 
     statusTimer = new QTimer(this);
     QObject::connect(statusTimer, &QTimer::timeout, this, &ControlApp::connectToServer);
-    statusTimer->start(5000);  // Check every 5 seconds
+    statusTimer->start(1000);  // Check every 5 seconds
 }
 
 ControlApp::~ControlApp() {
