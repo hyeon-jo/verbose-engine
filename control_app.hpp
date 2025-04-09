@@ -10,28 +10,10 @@
 #include <QtCore/QTimer>
 #include <QtGui/QCloseEvent>
 #include <vector>
-#include <array>
-#include <string>
 #include <memory>
-#include <boost/asio.hpp>
-#include "messages.hpp"
-
-enum { header_length = 8 };
-
-enum MessageType : uint8_t {
-    start = 19,
-    event = 20,
-    stop = 24,
-    configInfo = 26,
-};
-
-struct Backend {
-    std::string host;
-    std::array<int, 2> ports;
-    std::string name;
-    bool ready;
-    std::array<std::shared_ptr<boost::asio::ip::tcp::socket>, 2> sockets;  // Store socket objects
-};
+#include "backend_types.hpp"
+#include "tcp_client.hpp"
+#include "sensor_window.hpp"
 
 class ControlApp : public QMainWindow {
     Q_OBJECT
@@ -49,13 +31,15 @@ private slots:
     void toggleAction();
     void sendEvent();
     void enableEventButton();
+    void onConnectionStatusChanged(const Backend& backend, bool connected);
+    void onMessageStatusChanged(const Backend& backend, bool success);
 
 private:
     void setupUI();
     void centerWindow();
-    bool sendTcpMessage(uint8_t messageType, Backend& backend, int idx);
-    bool setMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
-    void cleanupSockets();
+    void updateStatusLabel(const Backend& backend, bool connected);
+    void cleanupConnections();
+    void checkAllConnected();
 
     std::vector<Backend> backends;
     std::vector<QLineEdit*> ipInputs;
@@ -67,9 +51,9 @@ private:
     QPushButton* applyBtn;
     QTimer* timer;
     QTimer* statusTimer;
-    std::shared_ptr<boost::asio::io_context> io_context;
 
+    std::unique_ptr<TcpClient> tcpClient;
+    std::unique_ptr<SensorWindow> sensorWindow;
     bool isToggleOn;
     bool eventSent;
-    uint32_t messageCounter;
 }; 
