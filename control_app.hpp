@@ -58,26 +58,32 @@ private slots:
 private:
     void setupUI();
     void centerWindow();
-    void updateStatusLabel(const Backend& backend, bool connected);
     void cleanupConnections();
+    void connectToServer();
+    void onConnectionStatusChanged(const Backend& backend, bool connected);
+    void onMessageStatusChanged(const Backend& backend, bool success);
+    void updateStatusLabel(const Backend& backend, bool connected);
+    void applyConfiguration();
+    void toggleAction();
+    void sendEvent();
+    void enableEventButton();
     void checkAllConnected();
+    void openSensorWindow();
 
     std::vector<Backend> backends;
+    std::unique_ptr<TcpClient> tcpClient;
+    std::unique_ptr<SensorWindow> sensorWindow;
+    QTimer* timer;
+    QTimer* statusTimer;
+    ConnectionThread* connectionThread;
+    bool isToggleOn;
+    bool eventSent;
+    QPushButton* toggleBtn;
+    QPushButton* eventBtn;
+    QPushButton* sensorBtn;
+    std::vector<QLabel*> statusLabels;
     std::vector<QLineEdit*> ipInputs;
     std::vector<QLineEdit*> portInputs1;
     std::vector<QLineEdit*> portInputs2;
-    std::vector<QLabel*> statusLabels;
-    QPushButton* toggleBtn;
-    QPushButton* eventBtn;
     QPushButton* applyBtn;
-    QTimer* timer;
-    QTimer* statusTimer;
-
-    std::unique_ptr<TcpClient> tcpClient;
-    std::unique_ptr<SensorWindow> sensorWindow;
-    bool isToggleOn;
-    bool eventSent;
-
-    // 스레드 관련 멤버 변수
-    ConnectionThread* connectionThread;
 }; 

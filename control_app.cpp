@@ -424,8 +424,31 @@ void ControlApp::setupUI() {
     );
     connect(eventBtn, &QPushButton::clicked, this, &ControlApp::sendEvent);
 
+    sensorBtn = new QPushButton("Open Sensor Window", this);
+    sensorBtn->setMinimumSize(200, 50);
+    sensorBtn->setStyleSheet(
+        "QPushButton {"
+        "    font-size: 32px;"
+        "    font-weight: bold;"
+        "    padding: 5px;"
+        "    background-color: #9C27B0;"
+        "    color: white;"
+        "    border-radius: 5px;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: #7B1FA2;"
+        "}"
+        "QPushButton:disabled {"
+        "    background-color: #cccccc;"
+        "    color: #666666;"
+        "}"
+    );
+    connect(sensorBtn, &QPushButton::clicked, this, &ControlApp::openSensorWindow);
+    sensorBtn->setEnabled(false);
+
     controlLayout->addWidget(toggleBtn, 1, 0, 1, 2, Qt::AlignCenter);
     controlLayout->addWidget(eventBtn, 2, 0, 1, 2, Qt::AlignCenter);
+    controlLayout->addWidget(sensorBtn, 3, 0, 1, 2, Qt::AlignCenter);
 
     controlGroup->setLayout(controlLayout);
     mainLayout->addWidget(controlGroup);
@@ -472,9 +495,16 @@ void ControlApp::checkAllConnected() {
         }
     }
 
-    if (allConnected && !sensorWindow) {
-        sensorWindow = std::make_unique<SensorWindow>();
-        sensorWindow->show();
-        this->hide();  // 기존 설정 창 숨기기
+    if (allConnected) {
+        sensorBtn->setEnabled(true);
+    } else {
+        sensorBtn->setEnabled(false);
     }
+}
+
+void ControlApp::openSensorWindow() {
+    if (!sensorWindow) {
+        sensorWindow = std::make_unique<SensorWindow>();
+    }
+    sensorWindow->show();
 } 
