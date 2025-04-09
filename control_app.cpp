@@ -3,13 +3,47 @@
 #include <QDesktopWidget>
 #include <QMessageBox>
 #include <QRegExp>
+#include <thread>
+#include <mutex>
+
+ConnectionThread::ConnectionThread(TcpClient* client, std::vector<Backend>& backends, QObject* parent)
+    : QThread(parent)
+    , tcpClient(client)
+    , backends(backends)
+    , stopRequested(false)
+    , shouldConnect(false)
+{
+}
+
+void ConnectionThread::stop()
+{
+    stopRequested = true;
+    wait();
+}
+
+void ConnectionThread::startConnection()
+{
+    shouldConnect = true;
+}
+
+void ConnectionThread::run()
+{
+    while (!stopRequested) {
+        if (shouldConnect) {
+            QMutexLocker locker(&mutex);
+            tcpClient->checkConnections(backends);
+            shouldConnect = false;
+        }
+        msleep(100);  // 100ms 대기
+    }
+}
 
 ControlApp::ControlApp(QWidget* parent)
     : QMainWindow(parent)
     , isToggleOn(false)
     , eventSent(false)
-    , tcpClient(std::make_unique<TcpClient>()) {
-    
+    , tcpClient(std::make_unique<TcpClient>())
+{
     // Initialize backends
     backends = {
         {
@@ -43,9 +77,17 @@ ControlApp::ControlApp(QWidget* parent)
     statusTimer = new QTimer(this);
     QObject::connect(statusTimer, &QTimer::timeout, this, &ControlApp::connectToServer);
     statusTimer->start(5000);  // Check every 5 seconds
+
+    // Create and start connection thread
+    connectionThread = new ConnectionThread(tcpClient.get(), backends, this);
+    connectionThread->start();
 }
 
 ControlApp::~ControlApp() {
+    if (connectionThread) {
+        connectionThread->stop();
+        delete connectionThread;
+    }
     cleanupConnections();
 }
 
@@ -61,7 +103,9 @@ void ControlApp::closeEvent(QCloseEvent* event) {
 }
 
 void ControlApp::connectToServer() {
-    tcpClient->checkConnections(backends);
+    if (connectionThread) {
+        connectionThread->startConnection();
+    }
 }
 
 void ControlApp::onConnectionStatusChanged(const Backend& backend, bool connected) {
