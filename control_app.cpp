@@ -288,13 +288,13 @@ void ControlApp::connectToServer() {
                 
                 // Connect synchronously
                 backend.sockets[1]->connect(endpoint);
-                sendMessage(MessageType::CONFIG_INFO, backend, idx++);
+                sendLoggingMessage(MessageType::CONFIG_INFO, backend, idx++);
             } catch (const std::exception& e) {
                 std::cerr << "Error connecting to second port: " << e.what() << std::endl;
             }
         }
         std::cout << "All backends connected successfully" << std::endl;
-        sendMessage(MessageType::DATA_SEND_REQUEST, backends[0], 0);
+        sendLoggingMessage(MessageType::DATA_SEND_REQUEST, backends[0], 0);
     }
 }
 
@@ -362,7 +362,7 @@ void ControlApp::toggleAction() {
         std::vector<bool> results;
         int idx = 0;
         for (auto& backend : backends) {
-            results.push_back(sendMessage(MessageType::START, backend, idx++));
+            results.push_back(sendLoggingMessage(MessageType::START, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("End");
@@ -385,7 +385,7 @@ void ControlApp::toggleAction() {
         else {
             for (int i = 0; i < results.size(); i++) {
                 if (results[i]) {
-                    sendMessage(MessageType::STOP, backends[i], i);
+                    sendLoggingMessage(MessageType::STOP, backends[i], i);
                 }
             }
         }
@@ -393,7 +393,7 @@ void ControlApp::toggleAction() {
         std::vector<bool> results;
         int idx = 0;
         for (auto& backend : backends) {
-            results.push_back(sendMessage(MessageType::STOP, backend, idx++));
+            results.push_back(sendLoggingMessage(MessageType::STOP, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("Start");
@@ -416,7 +416,7 @@ void ControlApp::toggleAction() {
         else {
             for (int i = 0; i < results.size(); i++) {
                 if (!results[i]) {
-                    sendMessage(MessageType::STOP, backends[i], i);
+                    sendLoggingMessage(MessageType::STOP, backends[i], i);
                 }
             }
         }
@@ -428,7 +428,7 @@ void ControlApp::sendEvent() {
     int idx = 0;
     QTimer::singleShot(30000, [this, &results, &idx]() {
         for (auto& backend : backends) {
-            results.push_back(sendMessage(MessageType::EVENT, backend, idx++));
+            results.push_back(sendLoggingMessage(MessageType::EVENT, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             eventBtn->setEnabled(false);
@@ -495,36 +495,42 @@ bool ControlApp::setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t mess
     return true;
 }
 
-bool ControlApp::sendMessage(uint8_t messageType, Backend& backend, int idx) {
+bool ControlApp::sendLinkMessage(Backend& backend, int idx) {
+    Header header = setHeader(MessageType::LINK);
+    char* headerBuffer = new char[21];
+    int offset = 0;
+    auto executor = backend.sockets[0]->get_executor();
+    auto handler = [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+        if (error) {
+            std::cerr << "Async write error: " << error.message() << std::endl;
+        }
+    };
+
+    memcpy(headerBuffer + offset, &header.timestamp, sizeof(header.timestamp));
+    offset += sizeof(header.timestamp);
+    memcpy(headerBuffer + offset, &header.messageType, sizeof(header.messageType));
+    offset += sizeof(header.messageType);
+    memcpy(headerBuffer + offset, &header.sequenceNumber, sizeof(header.sequenceNumber));
+    offset += sizeof(header.sequenceNumber);
+    memcpy(headerBuffer + offset, &header.bodyLength, sizeof(header.bodyLength));
+    if (backend.ready && backend.sockets[0]->is_open()) {
+        auto& socket = backend.sockets[0];
+        boost::asio::async_write(*socket, boost::asio::buffer(headerBuffer, 21),
+            boost::asio::bind_executor(executor, handler));
+    }
+}
+
+bool ControlApp::sendLoggingMessage(uint8_t messageType, Backend& backend, int idx) {
 
     std::ostringstream archive_stream;
     boost::archive::text_oarchive archive(archive_stream);
-    int socketIdx = 0;
-
-    if (messageType == MessageType::CONFIG_INFO
-        || messageType == MessageType::START
-        || messageType == MessageType::EVENT
-        || messageType == MessageType::STOP)
-    {
-        stDataRecordConfigMsg msg;
-        if (!setRecordConfigMessage(msg, messageType)) {
-            return false;
-        }
-        archive << msg;
-        socketIdx = 1;
+    int socketIdx = 1;
+    stDataRecordConfigMsg msg;
+    if (!setRecordConfigMessage(msg, messageType)) {
+        return false;
     }
-    else
-    {
-        stDataRequestMsg msg;
-        if (!setTCPMessage(msg, messageType)) {
-            return false;
-        }
-        msg.mDataType = eDataType::SENSOR;
-        msg.mSensorChannel = getSensorChannelBitmask(eSensorChannel::CAMERA_FRONT);
-        archive << msg;
-        socketIdx = 0;
-    }
-
+    archive << msg;
+    socketIdx = 1;
     std::cout << "Socket index: " << socketIdx << std::endl;
 
     std::string outbound_data_ = archive_stream.str();
@@ -602,7 +608,7 @@ bool ControlApp::getSensorDataFromServer(Backend& backend, int idx) {
     auto executor = backend.sockets[0]->get_executor();
     char* headerBuffer = new char[21];
     char* dataBuffer = nullptr;
-    if(!sendMessage(MessageType::LINK, backend, idx))
+    if(!sendLoggingMessage(MessageType::LINK, backend, idx))
     {
         return false;
     }
@@ -615,7 +621,7 @@ bool ControlApp::getSensorDataFromServer(Backend& backend, int idx) {
     Header linkAckHeader = *reinterpret_cast<Header*>(headerBuffer);
     if (linkAckHeader.messageType == MessageType::LINK_ACK) {
         while (true) {
-            if(!sendMessage(MessageType::DATA_SEND_REQUEST, backend, idx)) {
+            if(!sendLoggingMessage(MessageType::DATA_SEND_REQUEST, backend, idx)) {
                 return false;
             }
             boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, 21),

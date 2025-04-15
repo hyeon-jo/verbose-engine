@@ -37,12 +37,13 @@ private slots:
 private:
     void setupUI();
     void centerWindow();
-    bool sendMessage(uint8_t messageType, Backend& backend, int idx);
+    bool sendLoggingMessage(uint8_t messageType, Backend& backend, int idx);
     Header setHeader(uint8_t messageType);
     bool setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
     bool setTCPMessage(stDataRequestMsg& msg, uint8_t messageType);
     bool getSensorDataFromServer(Backend& backend, int idx);
     void cleanupSockets();
+    bool sendLinkMessage(Backend& backend, int idx);
 
     std::vector<Backend> backends;
     std::vector<QLineEdit*> ipInputs;
