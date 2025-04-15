@@ -16,22 +16,6 @@
 #include <boost/asio.hpp>
 #include "messages.hpp"
 
-enum { header_length = 8 };
-
-enum MessageType : uint8_t {
-    start = 19,
-    event = 20,
-    stop = 24,
-    configInfo = 26,
-};
-
-struct Backend {
-    std::string host;
-    std::array<int, 2> ports;
-    std::string name;
-    bool ready;
-    std::array<std::shared_ptr<boost::asio::ip::tcp::socket>, 2> sockets;  // Store socket objects
-};
 
 class ControlApp : public QMainWindow {
     Q_OBJECT
@@ -53,8 +37,11 @@ private slots:
 private:
     void setupUI();
     void centerWindow();
-    bool sendTcpMessage(uint8_t messageType, Backend& backend, int idx);
-    bool setMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
+    bool sendMessage(uint8_t messageType, Backend& backend, int idx);
+    Header setHeader(uint8_t messageType);
+    bool setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
+    bool setTCPMessage(stDataRequestMsg& msg, uint8_t messageType);
+    bool getSensorDataFromServer(Backend& backend, int idx);
     void cleanupSockets();
 
     std::vector<Backend> backends;

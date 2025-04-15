@@ -288,7 +288,7 @@ void ControlApp::connectToServer() {
                 
                 // Connect synchronously
                 backend.sockets[1]->connect(endpoint);
-                sendTcpMessage(MessageType::configInfo, backend, idx++);
+                sendMessage(MessageType::CONFIG_INFO, backend, idx++);
             } catch (const std::exception& e) {
                 std::cerr << "Error connecting to second port: " << e.what() << std::endl;
             }
@@ -361,7 +361,7 @@ void ControlApp::toggleAction() {
         std::vector<bool> results;
         int idx = 0;
         for (auto& backend : backends) {
-            results.push_back(sendTcpMessage(MessageType::start, backend, idx++));
+            results.push_back(sendMessage(MessageType::START, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("End");
@@ -384,7 +384,7 @@ void ControlApp::toggleAction() {
         else {
             for (int i = 0; i < results.size(); i++) {
                 if (results[i]) {
-                    sendTcpMessage(MessageType::stop, backends[i], i);
+                    sendMessage(MessageType::STOP, backends[i], i);
                 }
             }
         }
@@ -392,7 +392,7 @@ void ControlApp::toggleAction() {
         std::vector<bool> results;
         int idx = 0;
         for (auto& backend : backends) {
-            results.push_back(sendTcpMessage(MessageType::stop, backend, idx++));
+            results.push_back(sendMessage(MessageType::STOP, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("Start");
@@ -415,7 +415,7 @@ void ControlApp::toggleAction() {
         else {
             for (int i = 0; i < results.size(); i++) {
                 if (!results[i]) {
-                    sendTcpMessage(MessageType::stop, backends[i], i);
+                    sendMessage(MessageType::STOP, backends[i], i);
                 }
             }
         }
@@ -427,7 +427,7 @@ void ControlApp::sendEvent() {
     int idx = 0;
     QTimer::singleShot(30000, [this, &results, &idx]() {
         for (auto& backend : backends) {
-            results.push_back(sendTcpMessage(MessageType::event, backend, idx++));
+            results.push_back(sendMessage(MessageType::EVENT, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             eventBtn->setEnabled(false);
@@ -451,13 +451,23 @@ void ControlApp::centerWindow() {
     move(x, y);
 }
 
-bool ControlApp::setMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
-    msg.header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+Header ControlApp::setHeader(uint8_t messageType) {
+    Header header;
+    header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
-    msg.header.messageType = messageType;
-    msg.header.sequenceNumber = messageCounter++;
-    msg.header.bodyLength = sizeof(msg);
+    header.messageType = messageType;
+    if (messageType == MessageType::DATA_SEND_REQUEST) {
+        messageCounter++;
+    }
+    header.sequenceNumber = messageCounter;
+    header.bodyLength = 0;
+
+    return header;
+}
+
+bool ControlApp::setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
+    msg.header = setHeader(messageType);
 
     std::vector<stLoggingFile> loggingFileList;
     stLoggingFile loggingFile;
@@ -484,15 +494,32 @@ bool ControlApp::setMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
     return true;
 }
 
-bool ControlApp::sendTcpMessage(uint8_t messageType, Backend& backend, int idx) {
-    stDataRecordConfigMsg msg;
-    if (!setMessage(msg, messageType)) {
-        return false;
-    }
+bool ControlApp::sendMessage(uint8_t messageType, Backend& backend, int idx) {
 
     std::ostringstream archive_stream;
     boost::archive::text_oarchive archive(archive_stream);
-    archive << msg;
+
+    if (messageType == MessageType::CONFIG_INFO
+        || messageType == MessageType::START
+        || messageType == MessageType::EVENT
+        || messageType == MessageType::STOP)
+    {
+        stDataRecordConfigMsg msg;
+        if (!setRecordConfigMessage(msg, messageType)) {
+            return false;
+        }
+        archive << msg;
+    }
+    else
+    {
+        stDataRequestMsg msg;
+        if (!setTCPMessage(msg, messageType)) {
+            return false;
+        }
+        msg.mDataType = eDataType::SENSOR;
+        msg.mSensorChannel = getSensorChannelBitmask(eSensorChannel::CAMERA_FRONT);
+        archive << msg;
+    }
 
     std::string outbound_data_ = archive_stream.str();
     std::ostringstream header_stream;
@@ -552,6 +579,58 @@ bool ControlApp::sendTcpMessage(uint8_t messageType, Backend& backend, int idx) 
         return false;
     }
     return true;
+}
+
+bool ControlApp::setTCPMessage(stDataRequestMsg& msg, uint8_t messageType) {
+    msg.header = setHeader(messageType);
+    msg.mRequestStatus = 0;
+    // msg.mDataType = getSensorChannelBitmask(eSensorChannel::CAMERA_FRONT);
+    msg.mSensorChannel = 0;
+    msg.mServiceID = 0;
+    msg.mNetworkID = 0;
+
+    return true;
+}
+
+bool ControlApp::getSensorDataFromServer(Backend& backend, int idx) {
+    auto executor = backend.sockets[0]->get_executor();
+    char* headerBuffer = new char[21];
+    char* dataBuffer = nullptr;
+    if(!sendMessage(MessageType::LINK, backend, idx))
+    {
+        return false;
+    }
+    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, 21),
+        boost::asio::bind_executor(executor, [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+            if (error) {
+                std::cerr << "Async read error: " << error.message() << std::endl;
+            }
+        }));
+    Header linkAckHeader = *reinterpret_cast<Header*>(headerBuffer);
+    if (linkAckHeader.messageType == MessageType::LINK_ACK) {
+        while (true) {
+            if(!sendMessage(MessageType::DATA_SEND_REQUEST, backend, idx)) {
+                return false;
+            }
+            boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, 21),
+                boost::asio::bind_executor(executor, [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+                    if (error) {
+                        std::cerr << "Async read error: " << error.message() << std::endl;
+                    }
+                }));
+            Header retDataHeader = *reinterpret_cast<Header*>(headerBuffer);
+            dataBuffer = new char[retDataHeader.bodyLength];
+            boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(dataBuffer, retDataHeader.bodyLength),
+                boost::asio::bind_executor(executor, [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+                    if (error) {
+                        std::cerr << "Async read error: " << error.message() << std::endl;
+                    }
+                }));
+        }
+    }
+    else {
+        return false;
+    }
 }
 
 void ControlApp::cleanupSockets() {
