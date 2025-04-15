@@ -43,7 +43,7 @@ private:
     bool setTCPMessage(stDataRequestMsg& msg, uint8_t messageType);
     bool getSensorDataFromServer(Backend& backend, int idx);
     void cleanupSockets();
-    bool sendLinkMessage(Backend& backend, int idx);
+    bool sendDataRequestMessage(Backend& backend, int idx);
 
     std::vector<Backend> backends;
     std::vector<QLineEdit*> ipInputs;

@@ -495,8 +495,10 @@ bool ControlApp::setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t mess
     return true;
 }
 
-bool ControlApp::sendLinkMessage(Backend& backend, int idx) {
-    Header header = setHeader(MessageType::LINK);
+bool ControlApp::sendDataRequestMessage(Backend& backend, int idx) {
+    Header header = setHeader(MessageType::DATA_SEND_REQUEST);
+    stDataRequestMsg msg;
+    setTCPMessage(msg, MessageType::DATA_SEND_REQUEST);
     char* headerBuffer = new char[21];
     int offset = 0;
     auto executor = backend.sockets[0]->get_executor();
@@ -506,6 +508,8 @@ bool ControlApp::sendLinkMessage(Backend& backend, int idx) {
         }
     };
 
+    header.bodyLength = sizeof(msg);
+
     memcpy(headerBuffer + offset, &header.timestamp, sizeof(header.timestamp));
     offset += sizeof(header.timestamp);
     memcpy(headerBuffer + offset, &header.messageType, sizeof(header.messageType));
@@ -513,11 +517,31 @@ bool ControlApp::sendLinkMessage(Backend& backend, int idx) {
     memcpy(headerBuffer + offset, &header.sequenceNumber, sizeof(header.sequenceNumber));
     offset += sizeof(header.sequenceNumber);
     memcpy(headerBuffer + offset, &header.bodyLength, sizeof(header.bodyLength));
+    offset += sizeof(header.bodyLength);
     if (backend.ready && backend.sockets[0]->is_open()) {
         auto& socket = backend.sockets[0];
         boost::asio::async_write(*socket, boost::asio::buffer(headerBuffer, 21),
             boost::asio::bind_executor(executor, handler));
     }
+
+    headerBuffer = (char*)realloc(headerBuffer, (header.bodyLength + sizeof(header)));
+    memcpy(headerBuffer + offset, &msg.mRequestStatus, sizeof(msg.mRequestStatus));
+    offset += sizeof(msg.mRequestStatus);
+    memcpy(headerBuffer + offset, &msg.mDataType, sizeof(msg.mDataType));
+    offset += sizeof(msg.mDataType);
+    memcpy(headerBuffer + offset, &msg.mSensorChannel, sizeof(msg.mSensorChannel));
+    offset += sizeof(msg.mSensorChannel);
+    memcpy(headerBuffer + offset, &msg.mServiceID, sizeof(msg.mServiceID));
+    offset += sizeof(msg.mServiceID);
+    memcpy(headerBuffer + offset, &msg.mNetworkID, sizeof(msg.mNetworkID));
+    offset += sizeof(msg.mNetworkID);
+    
+    if (backend.ready && backend.sockets[0]->is_open()) {
+        auto& socket = backend.sockets[0];
+        boost::asio::async_write(*socket, boost::asio::buffer(headerBuffer, sizeof(headerBuffer)),
+            boost::asio::bind_executor(executor, handler));
+    }
+
 }
 
 bool ControlApp::sendLoggingMessage(uint8_t messageType, Backend& backend, int idx) {
@@ -596,8 +620,8 @@ bool ControlApp::sendLoggingMessage(uint8_t messageType, Backend& backend, int i
 bool ControlApp::setTCPMessage(stDataRequestMsg& msg, uint8_t messageType) {
     msg.header = setHeader(messageType);
     msg.mRequestStatus = 0;
-    // msg.mDataType = getSensorChannelBitmask(eSensorChannel::CAMERA_FRONT);
-    msg.mSensorChannel = 0;
+    msg.mDataType = eDataType::SENSOR;
+    msg.mSensorChannel = getSensorChannelBitmask(eSensorChannel::CAMERA_FRONT);
     msg.mServiceID = 0;
     msg.mNetworkID = 0;
 
