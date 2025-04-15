@@ -294,6 +294,7 @@ void ControlApp::connectToServer() {
             }
         }
         std::cout << "All backends connected successfully" << std::endl;
+        sendMessage(MessageType::DATA_SEND_REQUEST, backends[0], 0);
     }
 }
 
@@ -498,6 +499,7 @@ bool ControlApp::sendMessage(uint8_t messageType, Backend& backend, int idx) {
 
     std::ostringstream archive_stream;
     boost::archive::text_oarchive archive(archive_stream);
+    int socketIdx = 0;
 
     if (messageType == MessageType::CONFIG_INFO
         || messageType == MessageType::START
@@ -509,6 +511,7 @@ bool ControlApp::sendMessage(uint8_t messageType, Backend& backend, int idx) {
             return false;
         }
         archive << msg;
+        socketIdx = 1;
     }
     else
     {
@@ -519,7 +522,10 @@ bool ControlApp::sendMessage(uint8_t messageType, Backend& backend, int idx) {
         msg.mDataType = eDataType::SENSOR;
         msg.mSensorChannel = getSensorChannelBitmask(eSensorChannel::CAMERA_FRONT);
         archive << msg;
+        socketIdx = 0;
     }
+
+    std::cout << "Socket index: " << socketIdx << std::endl;
 
     std::string outbound_data_ = archive_stream.str();
     std::ostringstream header_stream;
@@ -534,8 +540,8 @@ bool ControlApp::sendMessage(uint8_t messageType, Backend& backend, int idx) {
     std::cout << "Outbound header: " << outbound_header_ << std::endl;
     std::cout << "Outbound data: " << outbound_data_ << std::endl;
 
-    if (backend.ready && backend.sockets[1]->is_open()) {
-        auto& socket = backend.sockets[1];
+    if (backend.ready && backend.sockets[socketIdx]->is_open()) {
+        auto& socket = backend.sockets[socketIdx];
         try {
             // Get executor from socket
             auto executor = socket->get_executor();
