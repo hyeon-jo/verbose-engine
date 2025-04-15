@@ -524,21 +524,22 @@ bool ControlApp::sendDataRequestMessage(Backend& backend, int idx) {
             boost::asio::bind_executor(executor, handler));
     }
 
-    headerBuffer = (char*)realloc(headerBuffer, (header.bodyLength + sizeof(header)));
-    memcpy(headerBuffer + offset, &msg.mRequestStatus, sizeof(msg.mRequestStatus));
+    char* bodyBuffer = new char[header.bodyLength];
+    offset = 0;
+    memcpy(bodyBuffer + offset, &msg.mRequestStatus, sizeof(msg.mRequestStatus));
     offset += sizeof(msg.mRequestStatus);
-    memcpy(headerBuffer + offset, &msg.mDataType, sizeof(msg.mDataType));
+    memcpy(bodyBuffer + offset, &msg.mDataType, sizeof(msg.mDataType));
     offset += sizeof(msg.mDataType);
-    memcpy(headerBuffer + offset, &msg.mSensorChannel, sizeof(msg.mSensorChannel));
+    memcpy(bodyBuffer + offset, &msg.mSensorChannel, sizeof(msg.mSensorChannel));
     offset += sizeof(msg.mSensorChannel);
-    memcpy(headerBuffer + offset, &msg.mServiceID, sizeof(msg.mServiceID));
+    memcpy(bodyBuffer + offset, &msg.mServiceID, sizeof(msg.mServiceID));
     offset += sizeof(msg.mServiceID);
-    memcpy(headerBuffer + offset, &msg.mNetworkID, sizeof(msg.mNetworkID));
+    memcpy(bodyBuffer + offset, &msg.mNetworkID, sizeof(msg.mNetworkID));
     offset += sizeof(msg.mNetworkID);
     
     if (backend.ready && backend.sockets[0]->is_open()) {
         auto& socket = backend.sockets[0];
-        boost::asio::async_write(*socket, boost::asio::buffer(headerBuffer, sizeof(headerBuffer)),
+        boost::asio::async_write(*socket, boost::asio::buffer(bodyBuffer, header.bodyLength),
             boost::asio::bind_executor(executor, handler));
     }
 
