@@ -45,6 +45,8 @@ private:
     void cleanupSockets();
     bool sendDataRequestMessage(Backend& backend, int idx);
     void parseHeader(char* headerBuffer, Header& header);
+    Protocol_Header getReceivedHeader(Backend backend, int idx);
+    void writeHeader(Backend backend, MessageType msgType);
 
     std::vector<Backend> backends;
     std::vector<QLineEdit*> ipInputs;

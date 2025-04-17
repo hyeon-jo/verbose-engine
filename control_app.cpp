@@ -306,21 +306,59 @@ void ControlApp::connectToServer() {
             }
         }
         std::cout << "All backends connected successfully" << std::endl;
-        sendDataRequestMessage(backends[0], 0);
-        char* headerBuffer = new char[21];
-        auto executor = backends[0].sockets[0]->get_executor();
-        auto handler = [this, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
-            if (error) {
-                std::cerr << "Async write error: " << error.message() << std::endl;
-            }
-        };
-        boost::asio::async_read(*backends[0].sockets[0], boost::asio::buffer(headerBuffer, 21),
-            boost::asio::bind_executor(executor, handler));
+}
 
-        Header header;
-        parseHeader(headerBuffer, header);
-        std::cout << "Header: " << header.timestamp << " " << header.messageType << " " << header.sequenceNumber << " " << header.bodyLength << std::endl;
-    }
+void ControlApp::writeHeader(Backend backend, MessageType msgType)
+{
+    char* headerBuffer = new char[22];
+    Header sendHeader = setHeader(msgType);
+
+    int offset = 0;
+    memset(headerBuffer, 0, 22);
+    memcpy(headerBuffer+offset, &sendHeader.timestamp, sizeof(sendHeader.timestamp));
+    offset += sizeof(sendHeader.timestamp);
+    memcpy(headerBuffer+offset, &sendHeader.messageType, sizeof(sendHeader.messageType));
+    offset += sizeof(sendHeader.messageType);
+    memcpy(headerBuffer+offset, &sendHeader.sequenceNumber, sizeof(sendHeader.sequenceNumber));
+    offset += sizeof(sendHeader.sequenceNumber);
+    memcpy(headerBuffer+offset, &sendHeader.bodyLength, sizeof(sendHeader.bodyLength));
+    offset += sizeof(sendHeader.bodyLength);
+
+    boost::asio::async_write(*backend.sockets[0], boost::asio::buffer(headerBuffer, 22));
+}
+
+Protocol_Header ControlApp::getReceivedHeader(Backend backend, int idx)
+{
+    usleep(300000);
+    char* headerBuffer = new char[sizeof(Protocol_Header)];
+    auto executor = backend.sockets[0]->get_executor();
+    auto handler = [this, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+        if (error) {
+            std::cerr << "Async read error: " << error.message() << std::endl;
+        }
+    };
+    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, sizeof(Protocol_Header)),
+        boost::asio::bind_executor(executor, handler));
+    
+    Protocol_Header receivedHeader = *reinterpret_cast<Protocol_Header*>(headerBuffer);
+    std::cout << "============ Header Info =============" << std::endl;
+    std::cout << "Timestamp: " << receivedHeader.timestamp << std::endl;
+    std::cout << "Message Type: " << receivedHeader.messageType << std::endl;
+    std::cout << "Sequence Number: " << receivedHeader.sequenceNumber << std::endl;
+    std::cout << "Body Length: " << receivedHeader.bodyLength << std::endl;
+    std::cout << "=======================================" << std::endl;
+    
+    char* bodyBuffer = new char[receivedHeader.bodyLength];
+    offset = 0;
+    memset(bodyBuffer, 0, receivedHeader.bodyLength);
+    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(bodyBuffer, receivedHeader.bodyLength),
+        boost::asio::bind_executor(executor, handler));
+
+    std::cout << "============ Body Info =============" << std::endl;
+    std::cout << "Body: " << bodyBuffer << std::endl;
+    std::cout << "====================================" << std::endl;
+
+    return receivedHeader;
 }
 
 void ControlApp::applyConfiguration() {
@@ -487,7 +525,7 @@ Header ControlApp::setHeader(uint8_t messageType) {
         messageCounter++;
     }
     header.sequenceNumber = messageCounter;
-    header.bodyLength = 0;
+    header.bodyLength = 1;
 
     return header;
 }
@@ -655,47 +693,6 @@ bool ControlApp::setTCPMessage(stDataRequestMsg& msg, uint8_t messageType) {
     msg.mNetworkID = 0;
 
     return true;
-}
-
-bool ControlApp::getSensorDataFromServer(Backend& backend, int idx) {
-    auto executor = backend.sockets[0]->get_executor();
-    char* headerBuffer = new char[21];
-    char* dataBuffer = nullptr;
-    if(!sendLoggingMessage(MessageType::LINK, backend, idx))
-    {
-        return false;
-    }
-    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, 21),
-        boost::asio::bind_executor(executor, [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
-            if (error) {
-                std::cerr << "Async read error: " << error.message() << std::endl;
-            }
-        }));
-    Header linkAckHeader = *reinterpret_cast<Header*>(headerBuffer);
-    if (linkAckHeader.messageType == MessageType::LINK_ACK) {
-        while (true) {
-            if(!sendLoggingMessage(MessageType::DATA_SEND_REQUEST, backend, idx)) {
-                return false;
-            }
-            boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, 21),
-                boost::asio::bind_executor(executor, [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
-                    if (error) {
-                        std::cerr << "Async read error: " << error.message() << std::endl;
-                    }
-                }));
-            Header retDataHeader = *reinterpret_cast<Header*>(headerBuffer);
-            dataBuffer = new char[retDataHeader.bodyLength];
-            boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(dataBuffer, retDataHeader.bodyLength),
-                boost::asio::bind_executor(executor, [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
-                    if (error) {
-                        std::cerr << "Async read error: " << error.message() << std::endl;
-                    }
-                }));
-        }
-    }
-    else {
-        return false;
-    }
 }
 
 void ControlApp::cleanupSockets() {

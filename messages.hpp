@@ -76,8 +76,28 @@ enum class eSensorChannel:uint8_t
 };
 
 inline uint32_t getSensorChannelBitmask(eSensorChannel channel) {
-    return 1 << static_cast<uint32_t>(channel);
+    return 0x01 << static_cast<uint32_t>(channel);
 }
+
+class [[gnu::packed]] Protocol_Header {
+public:
+    Protocol_Header();
+
+    //clang-format off
+    Protocol_Header(
+        uint8_t const messageType,
+        uint64_t const sequenceNumber,
+        uint32_t const bodyLength
+    );
+    //clang-format on
+
+    ~Protocol_Header() = default;
+
+    uint64_t timestamp;
+    uint8_t messageType;
+    uint64_t sequenceNumber;
+    uint32_t bodyLength;
+};
 
 struct Backend {
     std::string host;
