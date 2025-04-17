@@ -244,14 +244,14 @@ void ControlApp::setupUI() {
 
 void ControlApp::parseHeader(char* headerBuffer, Header& header) {
     int offset = 0;
-    // memcpy(header.timestamp, headerBuffer + offset, sizeof(header.timestamp));
-    // offset += sizeof(header.timestamp);
-    // memcpy(header.messageType, headerBuffer + offset, sizeof(header.messageType));
-    // offset += sizeof(header.messageType);
-    // memcpy(header.sequenceNumber, headerBuffer + offset, sizeof(header.sequenceNumber));
-    // offset += sizeof(header.sequenceNumber);
-    // memcpy(header.bodyLength, headerBuffer + offset, sizeof(header.bodyLength));
-    // offset += sizeof(header.bodyLength);
+    memcpy(&header.timestamp, headerBuffer + offset, sizeof(header.timestamp));
+    offset += sizeof(header.timestamp);
+    memcpy(&header.messageType, headerBuffer + offset, sizeof(header.messageType));
+    offset += sizeof(header.messageType);
+    memcpy(&header.sequenceNumber, headerBuffer + offset, sizeof(header.sequenceNumber));
+    offset += sizeof(header.sequenceNumber);
+    memcpy(&header.bodyLength, headerBuffer + offset, sizeof(header.bodyLength));
+    offset += sizeof(header.bodyLength);
 }
 
 void ControlApp::connectToServer() {
@@ -316,6 +316,10 @@ void ControlApp::connectToServer() {
         };
         boost::asio::async_read(*backends[0].sockets[0], boost::asio::buffer(headerBuffer, 21),
             boost::asio::bind_executor(executor, handler));
+
+        Header header;
+        parseHeader(headerBuffer, header);
+        std::cout << "Header: " << header.timestamp << " " << header.messageType << " " << header.sequenceNumber << " " << header.bodyLength << std::endl;
     }
 }
 
