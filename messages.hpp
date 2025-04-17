@@ -184,4 +184,22 @@ struct stDataRequestMsg
     }
 };
 
+struct stDataSensorReqMsg
+{
+    Header header;
+    uint32_t mSequenceNumber;
+    uint32_t mTotalNumber;
+    uint32_t mCurrentNumber;
+    uint32_t mFrameNumber;
+    uint64_t mTimestamp;
+    uint8_t mSensorType;
+    uint8_t mChannel;
+    uint16_t mImgWidth;
+    uint16_t mImgHeight;
+    uint8_t mImgDepth;
+    uint8_t mImgFormat;
+    uint32_t mNumPoints;
+    uint32_t mPayloadSize;
+};
+
 #endif // MESSAGES_HPP

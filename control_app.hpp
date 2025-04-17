@@ -44,6 +44,7 @@ private:
     bool getSensorDataFromServer(Backend& backend, int idx);
     void cleanupSockets();
     bool sendDataRequestMessage(Backend& backend, int idx);
+    void parseHeader(char* headerBuffer, Header& header);
 
     std::vector<Backend> backends;
     std::vector<QLineEdit*> ipInputs;

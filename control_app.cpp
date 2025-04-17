@@ -242,6 +242,18 @@ void ControlApp::setupUI() {
     );
 }
 
+void ControlApp::parseHeader(char* headerBuffer, Header& header) {
+    int offset = 0;
+    // memcpy(header.timestamp, headerBuffer + offset, sizeof(header.timestamp));
+    // offset += sizeof(header.timestamp);
+    // memcpy(header.messageType, headerBuffer + offset, sizeof(header.messageType));
+    // offset += sizeof(header.messageType);
+    // memcpy(header.sequenceNumber, headerBuffer + offset, sizeof(header.sequenceNumber));
+    // offset += sizeof(header.sequenceNumber);
+    // memcpy(header.bodyLength, headerBuffer + offset, sizeof(header.bodyLength));
+    // offset += sizeof(header.bodyLength);
+}
+
 void ControlApp::connectToServer() {
     bool allConnected = true;
 
@@ -294,7 +306,16 @@ void ControlApp::connectToServer() {
             }
         }
         std::cout << "All backends connected successfully" << std::endl;
-        sendLoggingMessage(MessageType::DATA_SEND_REQUEST, backends[0], 0);
+        sendDataRequestMessage(backends[0], 0);
+        char* headerBuffer = new char[21];
+        auto executor = backends[0].sockets[0]->get_executor();
+        auto handler = [this, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+            if (error) {
+                std::cerr << "Async write error: " << error.message() << std::endl;
+            }
+        };
+        boost::asio::async_read(*backends[0].sockets[0], boost::asio::buffer(headerBuffer, 21),
+            boost::asio::bind_executor(executor, handler));
     }
 }
 
@@ -502,7 +523,7 @@ bool ControlApp::sendDataRequestMessage(Backend& backend, int idx) {
     char* headerBuffer = new char[21];
     int offset = 0;
     auto executor = backend.sockets[0]->get_executor();
-    auto handler = [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+    auto handler = [this, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
         if (error) {
             std::cerr << "Async write error: " << error.message() << std::endl;
         }
@@ -543,6 +564,9 @@ bool ControlApp::sendDataRequestMessage(Backend& backend, int idx) {
             boost::asio::bind_executor(executor, handler));
     }
 
+    delete[] headerBuffer;
+    delete[] bodyBuffer;
+    return true;
 }
 
 bool ControlApp::sendLoggingMessage(uint8_t messageType, Backend& backend, int idx) {
