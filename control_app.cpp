@@ -306,37 +306,38 @@ void ControlApp::connectToServer() {
             }
         }
         std::cout << "All backends connected successfully" << std::endl;
+    }
 }
 
-void ControlApp::writeHeader(Backend backend, MessageType msgType)
-{
+void ControlApp::writeHeader(Backend& backend, MessageType msgType) {
     char* headerBuffer = new char[22];
     Header sendHeader = setHeader(msgType);
-
     int offset = 0;
-    memset(headerBuffer, 0, 22);
-    memcpy(headerBuffer+offset, &sendHeader.timestamp, sizeof(sendHeader.timestamp));
+
+    memcpy(headerBuffer + offset, &sendHeader.timestamp, sizeof(sendHeader.timestamp));
     offset += sizeof(sendHeader.timestamp);
-    memcpy(headerBuffer+offset, &sendHeader.messageType, sizeof(sendHeader.messageType));
+    memcpy(headerBuffer + offset, &sendHeader.messageType, sizeof(sendHeader.messageType));
     offset += sizeof(sendHeader.messageType);
-    memcpy(headerBuffer+offset, &sendHeader.sequenceNumber, sizeof(sendHeader.sequenceNumber));
+    memcpy(headerBuffer + offset, &sendHeader.sequenceNumber, sizeof(sendHeader.sequenceNumber));
     offset += sizeof(sendHeader.sequenceNumber);
-    memcpy(headerBuffer+offset, &sendHeader.bodyLength, sizeof(sendHeader.bodyLength));
+    memcpy(headerBuffer + offset, &sendHeader.bodyLength, sizeof(sendHeader.bodyLength));
     offset += sizeof(sendHeader.bodyLength);
 
-    boost::asio::async_write(*backend.sockets[0], boost::asio::buffer(headerBuffer, 22));
+    boost::asio::write(*backend.sockets[0], boost::asio::buffer(headerBuffer, 22));
 }
 
-Protocol_Header ControlApp::getReceivedHeader(Backend backend, int idx)
-{
+Protocol_Header ControlApp::getReceivedHeader(Backend& backend, int idx) {
     usleep(300000);
     char* headerBuffer = new char[sizeof(Protocol_Header)];
+    int offset = 0;
+
     auto executor = backend.sockets[0]->get_executor();
     auto handler = [this, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
         if (error) {
             std::cerr << "Async read error: " << error.message() << std::endl;
         }
     };
+
     boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, sizeof(Protocol_Header)),
         boost::asio::bind_executor(executor, handler));
     
