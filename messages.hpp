@@ -105,14 +105,6 @@ public:
     uint32_t bodyLength;
 };
 
-struct Backend {
-    std::string host;
-    std::array<int, 2> ports;
-    std::string name;
-    bool ready;
-    std::array<std::shared_ptr<boost::asio::ip::tcp::socket>, 2> sockets;  // Store socket objects
-};
-
 struct Header
 {
     uint64_t timestamp;
