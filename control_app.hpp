@@ -13,9 +13,19 @@
 #include <array>
 #include <string>
 #include <memory>
+#include <boost/asio.hpp>
 #include "messages.hpp"
 #include "image_viewer.hpp"
-#include "tcp_client.hpp"
+
+class TcpClient;
+
+struct Backend {
+    std::string host;
+    std::array<uint16_t, 2> ports;
+    std::string name;
+    bool ready;
+    std::array<std::shared_ptr<boost::asio::ip::tcp::socket>, 2> sockets;
+};
 
 class ControlApp : public QMainWindow {
     Q_OBJECT
@@ -23,6 +33,7 @@ class ControlApp : public QMainWindow {
 public:
     ControlApp(QWidget* parent = nullptr);
     ~ControlApp();
+    void processData(const char* imageData, int sensorType, int width, int height);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -37,21 +48,7 @@ private slots:
 private:
     void setupUI();
     void centerWindow();
-
-    // TCP Protocol functions
-    void cleanupSockets();
-    Header setHeader(uint8_t messageType);
-    void writeHeader(TcpClient::Backend& backend, MessageType msgType);
-    void parseHeader(char* headerBuffer, Header& header);
-    Protocol_Header getReceivedHeader(TcpClient::Backend& backend, int idx);
-    bool setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType);
-    bool sendDataRequestMessage(TcpClient::Backend& backend, int idx);
-
-    // Data logging control functions
-    bool setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
-    bool sendLoggingMessage(uint8_t messageType, TcpClient::Backend& backend, int idx);
-
-    std::vector<TcpClient::Backend> backends;
+    std::vector<Backend> backends;
     std::vector<QLineEdit*> ipInputs;
     std::vector<QLineEdit*> portInputs1;
     std::vector<QLineEdit*> portInputs2;

@@ -4,19 +4,15 @@
 #include <memory>
 #include <boost/asio.hpp>
 #include "messages.hpp"
+#include "control_app.hpp"
+
+class ControlApp;
+struct Backend;
 
 class TcpClient {
 public:
-    TcpClient();
+    TcpClient(ControlApp* app = nullptr);
     ~TcpClient();
-
-    struct Backend {
-        std::string host;
-        std::array<uint16_t, 2> ports;
-        std::string name;
-        bool ready;
-        std::array<std::shared_ptr<boost::asio::ip::tcp::socket>, 2> sockets;
-    };
 
     void initializeBackends();
     void cleanupSockets();
@@ -24,7 +20,7 @@ public:
     bool sendLoggingMessage(uint8_t messageType, Backend& backend, int idx);
     bool sendDataRequestMessage(Backend& backend, int idx);
     Protocol_Header getReceivedHeader(Backend& backend, int idx);
-
+    void sendData();
     std::vector<Backend>& getBackends() { return backends; }
     std::shared_ptr<boost::asio::io_context> getIoContext() { return io_context; }
 
@@ -34,8 +30,12 @@ private:
     void parseHeader(char* headerBuffer, Header& header);
     bool setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType);
     bool setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
+    std::vector<char*> receiveAll(Backend& backend, const size_t bufferSize, size_t recvSize);
+    void receiveData();
 
     std::vector<Backend> backends;
     std::shared_ptr<boost::asio::io_context> io_context;
     uint32_t messageCounter;
+    int sendStatus = 0;
+    ControlApp* controlApp;
 }; 

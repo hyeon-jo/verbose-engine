@@ -103,6 +103,7 @@ public:
     uint8_t messageType;
     uint64_t sequenceNumber;
     uint32_t bodyLength;
+    uint8_t mResult;
 };
 
 struct Header
@@ -204,9 +205,8 @@ struct stDataRequestMsg
 
 struct stDataSensorReqMsg
 {
-    Header header;
-    uint32_t mSequenceNumber;
-    uint32_t mTotalNumber;
+    // uint32_t mSequenceNumber;
+    // uint32_t mTotalNumber;
     uint32_t mCurrentNumber;
     uint32_t mFrameNumber;
     uint64_t mTimestamp;

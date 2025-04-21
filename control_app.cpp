@@ -1,8 +1,10 @@
 #include "control_app.hpp"
+#include "tcp_client.hpp"
 #include <QApplication>
 #include <QDesktopWidget>
 #include <QMessageBox>
 #include <iostream>
+#include <opencv2/opencv.hpp>
 
 ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent), 
     isToggleOn(false), eventSent(false) {
@@ -371,4 +373,18 @@ void ControlApp::connectToServer() {
 void ControlApp::closeEvent(QCloseEvent* event) {
     tcpClient->cleanupSockets();
     event->accept();
+}
+
+void ControlApp::processData(const char* imageData, int sensorType, int width, int height) {
+    
+    if (sensorType == 1) {
+        // YUV422UYVY를 RGB로 변환
+        cv::Mat yuv(height, width, CV_8UC2, const_cast<void*>(static_cast<const void*>(imageData)));
+        cv::Mat rgb;
+        cv::cvtColor(yuv, rgb, cv::COLOR_YUV2BGR_UYVY);
+        
+        // QImage로 변환
+        QImage img(rgb.data, rgb.cols, rgb.rows, rgb.step, QImage::Format_RGB888);
+        imageViewer->updateImage(0, rgb);
+    }
 }

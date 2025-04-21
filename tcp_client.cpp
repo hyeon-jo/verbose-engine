@@ -15,8 +15,9 @@ namespace {
     }
 }
 
-TcpClient::TcpClient() : messageCounter(0),
-    io_context(std::make_shared<boost::asio::io_context>()) {
+TcpClient::TcpClient(ControlApp* app) : messageCounter(0),
+    io_context(std::make_shared<boost::asio::io_context>()),
+    controlApp(app) {
     initializeBackends();
 }
 
@@ -25,22 +26,21 @@ TcpClient::~TcpClient() {
 }
 
 void TcpClient::initializeBackends() {
-    backends = {
-        {
-            "192.168.10.10",
-            {9090, 9091},
-            "Backend 1",
-            false,
-            {nullptr, nullptr}
-        },
-        {
-            "192.168.10.20",
-            {9090, 9091},
-            "Backend 2",
-            false,
-            {nullptr, nullptr}
-        }
-    };
+    backends.clear();
+    backends.push_back(Backend{
+        .host = "127.0.0.1",
+        .ports = {9090, 9091},
+        .name = "Backend 1",
+        .ready = false,
+        .sockets = {}
+    });
+    backends.push_back(Backend{
+        .host = "192.168.10.20",
+        .ports = {9090, 9091},
+        .name = "Backend 2",
+        .ready = false,
+        .sockets = {}
+    });
 }
 
 void TcpClient::cleanupSockets() {
@@ -329,3 +329,149 @@ bool TcpClient::sendLoggingMessage(uint8_t messageType, Backend& backend, int id
     }
     return true;
 } 
+
+void TcpClient::sendData() {
+    // TODO: Implement
+    while (true) {
+        if (sendStatus == 1) {
+            for (auto& backend : backends) {
+                writeHeader(backend, MessageType::LINK);
+            }
+            sendStatus = 1;
+        }
+        else if (sendStatus == 2) {
+            for (auto& backend : backends) {
+                writeHeader(backend, MessageType::REC_INFO);
+            }
+            sendStatus = 3;
+            sleep(3);
+
+            int idx = 0;
+            for (auto& backend : backends) {
+                sendDataRequestMessage(backend, idx++);
+            }
+            sleep(3);
+        }
+    }
+}
+
+std::vector<char*> TcpClient::receiveAll(Backend& backend, const size_t bufferSize, size_t recvSize) {
+
+    auto executor = backend.sockets[0]->get_executor();
+    auto handler = [this](const boost::system::error_code& error, std::size_t bytes_transferred) {
+        if (error) {
+            std::cerr << "Async read error: " << error.message() << std::endl;
+        }
+    };
+
+    std::vector<char*> data;
+    char* part = new char[bufferSize];
+
+    while (true) {
+
+        if (recvSize - strlen(part) < bufferSize) {
+            boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(part, recvSize - strlen(part) - 1),
+                boost::asio::bind_executor(executor, handler));
+            data.push_back(part);
+            break;
+        }
+
+        boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(part, bufferSize),
+            boost::asio::bind_executor(executor, handler));
+        data.push_back(part);
+
+        if (strlen(part) < bufferSize) {
+            break;
+        }
+    }
+
+    return data;
+}
+
+void TcpClient::receiveData() {
+    while (true) {
+        if (sendStatus == 1) {
+            int idx = 0;
+            auto flag = false;
+            for (auto& backend : backends) {
+                auto header = getReceivedHeader(backend, idx++);
+                if (header.messageType == MessageType::LINK_ACK) {
+                    if (!flag) {
+                        flag = true;
+                    }
+                    else {
+                        sendStatus = 2;
+                    }
+                }
+            }
+            if (!flag) {
+                std::cerr << "Link ACK not received" << std::endl;
+                sendStatus = 0;
+            }
+        }
+        if (sendStatus == 3) {
+            int offset = 7;
+            for (auto& backend : backends) {
+                auto executor = backend.sockets[0]->get_executor();
+                auto handler = [this](const boost::system::error_code& error, std::size_t bytes_transferred) {
+                    if (error) {
+                        std::cerr << "Async read error: " << error.message() << std::endl;
+                    }
+                };
+
+                char *response = new char[22];
+                boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(response, 22),
+                    boost::asio::bind_executor(executor, handler));
+
+                Header header;
+                parseHeader(response, header);
+
+                auto returnData = receiveAll(backend, header.bodyLength, 0);
+                size_t totalSize = 0;
+                for (auto& data : returnData) {
+                    totalSize += strlen(data);
+                }
+                
+                char* recvData = new char[totalSize];
+                size_t currentOffset = 0;
+                for (auto& data : returnData) {
+                    size_t dataSize = strlen(data);
+                    memcpy(recvData + currentOffset, data, dataSize);
+                    currentOffset += dataSize;
+                    delete[] data;
+                }
+                returnData.clear();
+
+                if (header.messageType == MessageType::DATA_SENSOR) {
+                    auto dataSize = sizeof(stDataSensorReqMsg) + 8;
+                    char* dataHeader = new char[dataSize];
+                    memcpy(dataHeader, recvData + offset, dataSize);
+                    stDataSensorReqMsg* dataSensorReqMsg = reinterpret_cast<stDataSensorReqMsg*>(dataHeader);
+                    std::cout << "============ Data Sensor Request Message =============" << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mCurrentNumber << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mFrameNumber << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mTimestamp << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mSensorType << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mChannel << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mImgWidth << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mImgHeight << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mImgDepth << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mImgFormat << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mNumPoints << std::endl;
+                    std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mPayloadSize << std::endl;
+                    std::cout << "=========================================================" << std::endl;
+
+                    if (dataSensorReqMsg->mSensorType == 1) {
+                        char* image_buffer = recvData + dataSize + offset;
+                        controlApp->processData(image_buffer, 1, dataSensorReqMsg->mImgWidth, dataSensorReqMsg->mImgHeight);
+                    }
+                    else if (dataSensorReqMsg->mSensorType == 2) {
+                        // TODO: Implement
+                    }
+                    
+                    
+                }
+            }
+        }
+    }
+}   
