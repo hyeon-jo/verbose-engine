@@ -13,10 +13,9 @@
 #include <array>
 #include <string>
 #include <memory>
-#include <boost/asio.hpp>
 #include "messages.hpp"
 #include "image_viewer.hpp"
-
+#include "tcp_client.hpp"
 
 class ControlApp : public QMainWindow {
     Q_OBJECT
@@ -62,8 +61,8 @@ private:
     QPushButton* applyBtn;
     QTimer* timer;
     QTimer* statusTimer;
-    std::shared_ptr<boost::asio::io_context> io_context;
     ImageViewer* imageViewer;
+    TcpClient* tcpClient;
 
     bool isToggleOn;
     bool eventSent;

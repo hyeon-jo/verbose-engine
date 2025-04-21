@@ -1,110 +1,102 @@
 #include "tcp_client.hpp"
 #include <boost/asio.hpp>
-#include <boost/system/error_code.hpp>
 #include <boost/archive/text_oarchive.hpp>
 #include <iomanip>
 #include <chrono>
 #include <ctime>
 #include <iostream>
-#include <thread>
-#include <unistd.h>
 
 using boost::asio::ip::tcp;
 using boost::system::error_code;
 
 namespace {
-    // Helper function to convert string to boost::asio::ip::address
     boost::asio::ip::address to_address(const std::string& host) {
         return boost::asio::ip::make_address(host);
     }
 }
 
-TcpClient::TcpClient(QObject* parent) : QObject(parent), io_context(std::make_shared<boost::asio::io_context>()) {
-    // IO 컨텍스트를 별도의 스레드에서 실행
-    io_thread = std::make_unique<std::thread>([this]() {
-        try {
-            io_context->run();
-        } catch (const std::exception& e) {
-            std::cerr << "IO context error: " << e.what() << std::endl;
-        }
-    });
+TcpClient::TcpClient() : messageCounter(0),
+    io_context(std::make_shared<boost::asio::io_context>()) {
+    initializeBackends();
 }
 
 TcpClient::~TcpClient() {
-    // IO 컨텍스트와 스레드 정리
-    if (io_context) {
-        io_context->stop();
-    }
-    if (io_thread && io_thread->joinable()) {
-        io_thread->join();
-    }
+    cleanupSockets();
 }
 
-void TcpClient::connectToServer(Backend& backend, const std::function<void(bool)>& callback) {
-    try {
-        // 소켓 생성
-        backend.sockets[0] = std::make_shared<tcp::socket>(*io_context);
-        
-        // 엔드포인트 생성
-        tcp::endpoint endpoint(to_address(backend.host), backend.ports[0]);
-        
-        // 비동기 연결 시작
-        auto socket = backend.sockets[0];
-        auto backend_ptr = std::make_shared<Backend>(backend);
-        
-        socket->async_connect(endpoint,
-            [this, socket, backend_ptr, callback](const boost::system::error_code& error) {
-                if (!error) {
-                    backend_ptr->ready = true;
-                    backend_ptr->sockets[0] = socket;
-
-                    // 두 번째 소켓 연결
-                    try {
-                        backend_ptr->sockets[1] = std::make_shared<tcp::socket>(*io_context);
-                        tcp::endpoint endpoint2(to_address(backend_ptr->host), backend_ptr->ports[1]);
-                        auto socket2 = backend_ptr->sockets[1];
-                        
-                        socket2->async_connect(endpoint2,
-                            [this, socket2, backend_ptr](const boost::system::error_code& error) {
-                                if (!error) {
-                                    backend_ptr->sockets[1] = socket2;
-                                } else {
-                                    std::cerr << "Error connecting to second port: " << error.message() << std::endl;
-                                }
-                            });
-                    } catch (const std::exception& e) {
-                        std::cerr << "Error setting up second socket: " << e.what() << std::endl;
-                    }
-                    callback(true);
-                } else {
-                    std::cerr << "Error with " << backend_ptr->name << ":" 
-                            << backend_ptr->ports[0] << ": " << error.message() << std::endl;
-                    callback(false);
-                }
-            });
-    } catch (const std::exception& e) {
-        std::cerr << "Error setting up socket: " << e.what() << std::endl;
-        callback(false);
-    }
+void TcpClient::initializeBackends() {
+    backends = {
+        {
+            "192.168.10.10",
+            {9090, 9091},
+            "Backend 1",
+            false,
+            {nullptr, nullptr}
+        },
+        {
+            "192.168.10.20",
+            {9090, 9091},
+            "Backend 2",
+            false,
+            {nullptr, nullptr}
+        }
+    };
 }
 
 void TcpClient::cleanupSockets() {
-    // 모든 백엔드의 소켓을 정리
-    io_context->stop();
-    if (io_thread && io_thread->joinable()) {
-        io_thread->join();
-    }
-    io_context = std::make_shared<boost::asio::io_context>();
-    io_thread = std::make_unique<std::thread>([this]() {
-        try {
-            io_context->run();
-        } catch (const std::exception& e) {
-            std::cerr << "IO context error: " << e.what() << std::endl;
+    for (auto& backend : backends) {
+        for (auto& socket : backend.sockets) {
+            if (socket && socket->is_open()) {
+                try {
+                    socket->close();
+                } catch (const std::exception& e) {
+                    std::cerr << "Error closing socket: " << e.what() << std::endl;
+                }
+                socket = nullptr;
+            }
         }
-    });
+        backend.ready = false;
+    }
 }
 
-Header TcpClient::setHeader(uint8_t messageType, uint32_t& messageCounter) {
+bool TcpClient::connectToServer() {
+    bool allConnected = true;
+
+    for (size_t i = 0; i < backends.size(); ++i) {
+        uint32_t prevCounter = messageCounter;
+        try {
+            backends[i].sockets[0] = std::make_shared<tcp::socket>(*io_context);
+            tcp::endpoint endpoint(to_address(backends[i].host), backends[i].ports[0]);
+            backends[i].sockets[0]->connect(endpoint);
+            backends[i].ready = true;
+        } catch (const std::exception& e) {
+            std::cerr << "Error with " << backends[i].name << ":" 
+                      << backends[i].ports[0] << ": " << e.what() << std::endl;
+            allConnected = false;
+            messageCounter = prevCounter;
+            continue;
+        }
+    }
+
+    if (allConnected) {
+        int idx = 0;
+        for (auto& backend : backends) {
+            try {
+                backend.sockets[1] = std::make_shared<tcp::socket>(*io_context);
+                tcp::endpoint endpoint(to_address(backend.host), backend.ports[1]);
+                backend.sockets[1]->connect(endpoint);
+                sendLoggingMessage(MessageType::CONFIG_INFO, backend, idx++);
+            } catch (const std::exception& e) {
+                std::cerr << "Error connecting to second port: " << e.what() << std::endl;
+            }
+        }
+        std::cout << "All backends connected successfully" << std::endl;
+    }
+
+    return allConnected;
+}
+
+Header TcpClient::setHeader(uint8_t messageType) {
     Header header;
     header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()
@@ -119,9 +111,9 @@ Header TcpClient::setHeader(uint8_t messageType, uint32_t& messageCounter) {
     return header;
 }
 
-void TcpClient::writeHeader(Backend& backend, MessageType msgType, uint32_t& messageCounter) {
+void TcpClient::writeHeader(Backend& backend, MessageType msgType) {
     char* headerBuffer = new char[22];
-    Header sendHeader = setHeader(msgType, messageCounter);
+    Header sendHeader = setHeader(msgType);
     int offset = 0;
 
     memcpy(headerBuffer + offset, &sendHeader.timestamp, sizeof(sendHeader.timestamp));
@@ -134,7 +126,6 @@ void TcpClient::writeHeader(Backend& backend, MessageType msgType, uint32_t& mes
     offset += sizeof(sendHeader.bodyLength);
 
     boost::asio::write(*backend.sockets[0], boost::asio::buffer(headerBuffer, 22));
-    delete[] headerBuffer;
 }
 
 void TcpClient::parseHeader(char* headerBuffer, Header& header) {
@@ -181,13 +172,11 @@ Protocol_Header TcpClient::getReceivedHeader(Backend& backend, int idx) {
     std::cout << "Body: " << bodyBuffer << std::endl;
     std::cout << "====================================" << std::endl;
 
-    delete[] headerBuffer;
-    delete[] bodyBuffer;
     return receivedHeader;
 }
 
-bool TcpClient::setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType, uint32_t& messageCounter) {
-    msg.header = setHeader(messageType, messageCounter);
+bool TcpClient::setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType) {
+    msg.header = setHeader(messageType);
     msg.mRequestStatus = 0;
     msg.mDataType = 1;
     msg.mSensorChannel = 524288;
@@ -197,10 +186,10 @@ bool TcpClient::setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType
     return true;
 }
 
-bool TcpClient::sendDataRequestMessage(Backend& backend, int idx, uint32_t& messageCounter) {
-    Header header = setHeader(MessageType::DATA_SEND_REQUEST, messageCounter);
+bool TcpClient::sendDataRequestMessage(Backend& backend, int idx) {
+    Header header = setHeader(MessageType::DATA_SEND_REQUEST);
     stDataRequestMsg msg;
-    setDataRequestMessage(msg, MessageType::DATA_SEND_REQUEST, messageCounter);
+    setDataRequestMessage(msg, MessageType::DATA_SEND_REQUEST);
     char* headerBuffer = new char[21];
     int offset = 0;
     auto executor = backend.sockets[0]->get_executor();
@@ -250,8 +239,8 @@ bool TcpClient::sendDataRequestMessage(Backend& backend, int idx, uint32_t& mess
     return true;
 }
 
-bool TcpClient::setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType, uint32_t& messageCounter) {
-    msg.header = setHeader(messageType, messageCounter);
+bool TcpClient::setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
+    msg.header = setHeader(messageType);
 
     std::vector<stLoggingFile> loggingFileList;
     stLoggingFile loggingFile;
@@ -279,15 +268,64 @@ bool TcpClient::setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messa
 }
 
 bool TcpClient::sendLoggingMessage(uint8_t messageType, Backend& backend, int idx) {
-    // 메시지 전송 로직
-    if (backend.ready && backend.sockets[0] && backend.sockets[0]->is_open()) {
+    std::ostringstream archive_stream;
+    boost::archive::text_oarchive archive(archive_stream);
+    int socketIdx = 1;
+    stDataRecordConfigMsg msg;
+    if (!setRecordConfigMessage(msg, messageType)) {
+        return false;
+    }
+    archive << msg;
+    socketIdx = 1;
+    std::cout << "Socket index: " << socketIdx << std::endl;
+
+    std::string outbound_data_ = archive_stream.str();
+    std::ostringstream header_stream;
+    header_stream << std::setw(header_length) << std::hex << outbound_data_.size();
+
+    if (!header_stream || header_stream.str().size() != header_length) {
+        std::cerr << "Incorrect header length" << std::endl;
+        return false;
+    }
+    std::string outbound_header_ = header_stream.str();
+
+    std::cout << "Outbound header: " << outbound_header_ << std::endl;
+    std::cout << "Outbound data: " << outbound_data_ << std::endl;
+
+    if (backend.ready && backend.sockets[socketIdx]->is_open()) {
+        auto& socket = backend.sockets[socketIdx];
         try {
-            // 메시지 전송 구현
-            return true;
+            auto executor = socket->get_executor();
+            auto handler = [this, &backend, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+                if (error) {
+                    std::cerr << "Async write error: " << error.message() << std::endl;
+                } else {
+                    std::cout << "Async write completed: " << bytes_transferred << " bytes" << std::endl;
+                }
+            };
+
+            boost::asio::async_write(*socket, 
+                boost::asio::buffer(outbound_header_),
+                boost::asio::bind_executor(executor, handler));
+
+            boost::asio::async_write(*socket, 
+                boost::asio::buffer(outbound_data_),
+                boost::asio::bind_executor(executor, handler));
+
         } catch (const std::exception& e) {
             std::cerr << "Error sending message: " << e.what() << std::endl;
+            socket = nullptr;
             return false;
         }
     }
-    return false;
+    else if (backend.ready) {
+        std::cerr << "Socket is closed" << std::endl;
+        backend.ready = false;
+        return false;
+    }
+    else {
+        std::cerr << "Backend is not ready" << std::endl;
+        return false;
+    }
+    return true;
 } 

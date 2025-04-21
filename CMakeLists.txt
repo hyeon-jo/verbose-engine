@@ -20,6 +20,8 @@ add_executable(control_app
     control_app.hpp
     image_viewer.cpp
     image_viewer.hpp
+    tcp_client.cpp
+    tcp_client.hpp
     messages.hpp
 )
 

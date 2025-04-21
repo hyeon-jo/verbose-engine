@@ -24,27 +24,9 @@ namespace {
 }
 
 ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent), 
-    isToggleOn(false), eventSent(false), messageCounter(0),
-    io_context(std::make_shared<boost::asio::io_context>()) {
+    isToggleOn(false), eventSent(false) {
     
-    // Initialize backends
-    backends = {
-        {
-            "192.168.10.10",
-            {9090, 9091},
-            "Backend 1",
-            false,
-            {nullptr, nullptr}
-        },
-        {
-            "192.168.10.20",
-            {9090, 9091},
-            "Backend 2",
-            false,
-            {nullptr, nullptr}
-        }
-    };
-
+    tcpClient = new TcpClient();
     setupUI();
 
     // Setup timers
@@ -62,7 +44,7 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
 }
 
 ControlApp::~ControlApp() {
-    cleanupSockets();
+    delete tcpClient;
 }
 
 void ControlApp::setupUI() {
@@ -78,6 +60,7 @@ void ControlApp::setupUI() {
     configLayout->setSpacing(10);
 
     // Create input fields for each backend
+    auto& backends = tcpClient->getBackends();
     for (size_t i = 0; i < backends.size(); ++i) {
         QLabel* ipLabel = new QLabel(QString::fromStdString(backends[i].name + " IP:"), this);
         ipLabel->setStyleSheet("font-size: 32px;");
@@ -251,8 +234,8 @@ void ControlApp::toggleAction() {
     if (!isToggleOn) {  // Sending START
         std::vector<bool> results;
         int idx = 0;
-        for (auto& backend : backends) {
-            results.push_back(sendLoggingMessage(MessageType::START, backend, idx++));
+        for (auto& backend : tcpClient->getBackends()) {
+            results.push_back(tcpClient->sendLoggingMessage(MessageType::START, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("End");
@@ -275,15 +258,15 @@ void ControlApp::toggleAction() {
         else {
             for (int i = 0; i < results.size(); i++) {
                 if (results[i]) {
-                    sendLoggingMessage(MessageType::STOP, backends[i], i);
+                    tcpClient->sendLoggingMessage(MessageType::STOP, tcpClient->getBackends()[i], i);
                 }
             }
         }
     } else {  // Sending END
         std::vector<bool> results;
         int idx = 0;
-        for (auto& backend : backends) {
-            results.push_back(sendLoggingMessage(MessageType::STOP, backend, idx++));
+        for (auto& backend : tcpClient->getBackends()) {
+            results.push_back(tcpClient->sendLoggingMessage(MessageType::STOP, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             toggleBtn->setText("Start");
@@ -306,7 +289,7 @@ void ControlApp::toggleAction() {
         else {
             for (int i = 0; i < results.size(); i++) {
                 if (!results[i]) {
-                    sendLoggingMessage(MessageType::STOP, backends[i], i);
+                    tcpClient->sendLoggingMessage(MessageType::STOP, tcpClient->getBackends()[i], i);
                 }
             }
         }
@@ -317,8 +300,8 @@ void ControlApp::sendEvent() {
     std::vector<bool> results;
     int idx = 0;
     QTimer::singleShot(30000, [this, &results, &idx]() {
-        for (auto& backend : backends) {
-            results.push_back(sendLoggingMessage(MessageType::EVENT, backend, idx++));
+        for (auto& backend : tcpClient->getBackends()) {
+            results.push_back(tcpClient->sendLoggingMessage(MessageType::EVENT, backend, idx++));
         }
         if (std::all_of(results.begin(), results.end(), [](bool result) { return result; })) {
             eventBtn->setEnabled(false);
@@ -346,6 +329,7 @@ void ControlApp::applyConfiguration() {
     bool allValid = true;
     std::string errorMessage;
 
+    auto& backends = tcpClient->getBackends();
     for (size_t i = 0; i < backends.size(); ++i) {
         QString ip = ipInputs[i]->text().trimmed();
         QString port1 = portInputs1[i]->text().trimmed();
@@ -388,7 +372,7 @@ void ControlApp::applyConfiguration() {
         backends[i].host = ip.toStdString();
         backends[i].ports[0] = portNum1;
         backends[i].ports[1] = portNum2;
-        cleanupSockets();
+        tcpClient->cleanupSockets();
     }
 
     if (!allValid) {
@@ -402,80 +386,30 @@ void ControlApp::applyConfiguration() {
 }
 
 void ControlApp::connectToServer() {
-    bool allConnected = true;
-
-    for (size_t i = 0; i < backends.size(); ++i) {
-        uint32_t prevCounter = messageCounter;
-        try {
-            // Create socket
-            backends[i].sockets[0] = std::make_shared<tcp::socket>(*io_context);
-            
-            // Resolve endpoint
-            tcp::endpoint endpoint(to_address(backends[i].host), backends[i].ports[0]);
-            
-            // Connect synchronously
-            backends[i].sockets[0]->connect(endpoint);
-
-            // Store socket
-            backends[i].ready = true;
-            statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Connected"));
-            statusLabels[i]->setStyleSheet("color: green; font-size: 32px;");
-
-        } catch (const std::exception& e) {
-            std::cerr << "Error with " << backends[i].name << ":" 
-                      << backends[i].ports[0] << ": " << e.what() << std::endl;
-            allConnected = false;
-            statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Not Connected"));
-            statusLabels[i]->setStyleSheet("color: red; font-size: 32px;");
-            messageCounter = prevCounter;
-            continue;
-        }
-    }
-
-    if (allConnected) {
+    if (tcpClient->connectToServer()) {
         statusTimer->stop();
         eventSent = false;
         eventBtn->setEnabled(true);
         toggleBtn->setEnabled(true);
 
-        // Connect second sockets
-        int idx = 0;
-        for (auto& backend : backends) {
-            try {
-                backend.sockets[1] = std::make_shared<tcp::socket>(*io_context);
-                tcp::endpoint endpoint(to_address(backend.host), backend.ports[1]);
-                
-                // Connect synchronously
-                backend.sockets[1]->connect(endpoint);
-                sendLoggingMessage(MessageType::CONFIG_INFO, backend, idx++);
-            } catch (const std::exception& e) {
-                std::cerr << "Error connecting to second port: " << e.what() << std::endl;
-            }
+        auto& backends = tcpClient->getBackends();
+        for (size_t i = 0; i < backends.size(); ++i) {
+            statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Connected"));
+            statusLabels[i]->setStyleSheet("color: green; font-size: 32px;");
         }
-        std::cout << "All backends connected successfully" << std::endl;
-    }
-}
-
-void ControlApp::cleanupSockets() {
-    for (auto& backend : backends) {
-        for (auto& socket : backend.sockets) {
-            if (socket && socket->is_open()) {
-                try {
-                    socket->close();
-                } catch (const std::exception& e) {
-                    std::cerr << "Error closing socket: " << e.what() << std::endl;
-                }
-                socket = nullptr;
-            }
+    } else {
+        auto& backends = tcpClient->getBackends();
+        for (size_t i = 0; i < backends.size(); ++i) {
+            statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Not Connected"));
+            statusLabels[i]->setStyleSheet("color: red; font-size: 32px;");
         }
-        backend.ready = false;
     }
 }
 
 void ControlApp::closeEvent(QCloseEvent* event) {
-    cleanupSockets();
+    tcpClient->cleanupSockets();
     event->accept();
-} 
+}
 
 Header ControlApp::setHeader(uint8_t messageType) {
     Header header;

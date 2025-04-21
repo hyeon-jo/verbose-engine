@@ -1,11 +1,17 @@
-#ifndef MESSAGES_HPP
-#define MESSAGES_HPP
+#pragma once
 
 #include <vector>
+#include <string>
+#include <array>
+#include <memory>
 #include <map>
+#include <boost/asio.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
 #include <boost/serialization/vector.hpp>
-#include <boost/serialization/access.hpp>
+#include <boost/serialization/string.hpp>
 #include <boost/serialization/map.hpp>
+#include <boost/serialization/access.hpp>
 #include <boost/serialization/split_member.hpp>
 #include <boost/serialization/base_object.hpp>
 #include <thread>
@@ -221,5 +227,3 @@ struct stDataSensorReqMsg
     uint32_t mNumPoints;
     uint32_t mPayloadSize;
 };
-
-#endif // MESSAGES_HPP
