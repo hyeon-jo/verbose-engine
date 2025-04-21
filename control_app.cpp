@@ -54,6 +54,11 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
     statusTimer = new QTimer(this);
     QObject::connect(statusTimer, &QTimer::timeout, this, &ControlApp::connectToServer);
     statusTimer->start(1000);  // Check every 5 seconds
+
+    // Initialize and show image viewer in a separate window
+    imageViewer = new ImageViewer(nullptr);  // nullptr as parent to make it a separate window
+    imageViewer->setWindowFlags(Qt::Window);  // Make it a separate window
+    imageViewer->show();
 }
 
 ControlApp::~ControlApp() {

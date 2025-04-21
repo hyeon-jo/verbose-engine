@@ -12,11 +12,14 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt5 COMPONENTS Core Widgets REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system serialization)
 find_package(Threads REQUIRED)
+find_package(OpenCV REQUIRED)
 
 add_executable(control_app
     main.cpp
     control_app.cpp
     control_app.hpp
+    image_viewer.cpp
+    image_viewer.hpp
     messages.hpp
 )
 
@@ -27,4 +30,5 @@ target_link_libraries(control_app PRIVATE
     Boost::serialization
     Threads::Threads
     pthread
+    ${OpenCV_LIBS}
 ) 

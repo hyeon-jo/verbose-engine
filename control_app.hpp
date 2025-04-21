@@ -15,6 +15,7 @@
 #include <memory>
 #include <boost/asio.hpp>
 #include "messages.hpp"
+#include "image_viewer.hpp"
 
 
 class ControlApp : public QMainWindow {
@@ -62,6 +63,7 @@ private:
     QTimer* timer;
     QTimer* statusTimer;
     std::shared_ptr<boost::asio::io_context> io_context;
+    ImageViewer* imageViewer;
 
     bool isToggleOn;
     bool eventSent;
