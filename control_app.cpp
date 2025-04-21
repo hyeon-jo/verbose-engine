@@ -5,11 +5,13 @@
 #include <QMessageBox>
 #include <iostream>
 #include <opencv2/opencv.hpp>
+#include <thread>
+#include <atomic>
 
 ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent), 
-    isToggleOn(false), eventSent(false) {
+    isToggleOn(false), eventSent(false), messageCounter(0) {
     
-    tcpClient = new TcpClient();
+    tcpClient = new TcpClient(this);
     setupUI();
 
     // Setup timers
@@ -18,15 +20,41 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
 
     statusTimer = new QTimer(this);
     QObject::connect(statusTimer, &QTimer::timeout, this, &ControlApp::connectToServer);
-    statusTimer->start(1000);  // Check every 5 seconds
+    statusTimer->start(1000);  // Check every 1 second
 
     // Initialize and show image viewer in a separate window
-    imageViewer = new ImageViewer(nullptr);  // nullptr as parent to make it a separate window
-    imageViewer->setWindowFlags(Qt::Window);  // Make it a separate window
+    imageViewer = new ImageViewer(nullptr);
+    imageViewer->setWindowFlags(Qt::Window);
     imageViewer->show();
+
+    // Initialize data threads
+    dataThread = std::thread([this]() {
+        while (!stopDataThread) {
+            if (isToggleOn) {
+                tcpClient->sendData();
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+    });
+
+    receiveThread = std::thread([this]() {
+        while (!stopReceiveThread) {
+            if (isToggleOn) {
+                tcpClient->receiveData();
+            }
+        }
+    });
 }
 
 ControlApp::~ControlApp() {
+    stopDataThread = true;
+    stopReceiveThread = true;
+    if (dataThread.joinable()) {
+        dataThread.join();
+    }
+    if (receiveThread.joinable()) {
+        receiveThread.join();
+    }
     delete tcpClient;
 }
 

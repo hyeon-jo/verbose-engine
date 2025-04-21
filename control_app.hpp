@@ -13,6 +13,8 @@
 #include <array>
 #include <string>
 #include <memory>
+#include <thread>
+#include <atomic>
 #include <boost/asio.hpp>
 #include "messages.hpp"
 #include "image_viewer.hpp"
@@ -64,4 +66,9 @@ private:
     bool isToggleOn;
     bool eventSent;
     uint32_t messageCounter;
+
+    std::thread dataThread;
+    std::thread receiveThread;
+    std::atomic<bool> stopDataThread{false};
+    std::atomic<bool> stopReceiveThread{false};
 }; 
