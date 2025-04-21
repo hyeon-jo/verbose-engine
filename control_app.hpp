@@ -37,16 +37,19 @@ private slots:
 private:
     void setupUI();
     void centerWindow();
-    bool sendLoggingMessage(uint8_t messageType, Backend& backend, int idx);
-    Header setHeader(uint8_t messageType);
-    bool setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
-    bool setTCPMessage(stDataRequestMsg& msg, uint8_t messageType);
-    bool getSensorDataFromServer(Backend& backend, int idx);
+
+    // TCP Protocol functions
     void cleanupSockets();
-    bool sendDataRequestMessage(Backend& backend, int idx);
+    Header setHeader(uint8_t messageType);
+    void writeHeader(Backend& backend, MessageType msgType);
     void parseHeader(char* headerBuffer, Header& header);
     Protocol_Header getReceivedHeader(Backend& backend, int idx);
-    void writeHeader(Backend& backend, MessageType msgType);
+    bool setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType);
+    bool sendDataRequestMessage(Backend& backend, int idx);
+
+    // Data logging control functions
+    bool setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType);
+    bool sendLoggingMessage(uint8_t messageType, Backend& backend, int idx);
 
     std::vector<Backend> backends;
     std::vector<QLineEdit*> ipInputs;

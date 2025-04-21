@@ -242,185 +242,6 @@ void ControlApp::setupUI() {
     );
 }
 
-void ControlApp::parseHeader(char* headerBuffer, Header& header) {
-    int offset = 0;
-    memcpy(&header.timestamp, headerBuffer + offset, sizeof(header.timestamp));
-    offset += sizeof(header.timestamp);
-    memcpy(&header.messageType, headerBuffer + offset, sizeof(header.messageType));
-    offset += sizeof(header.messageType);
-    memcpy(&header.sequenceNumber, headerBuffer + offset, sizeof(header.sequenceNumber));
-    offset += sizeof(header.sequenceNumber);
-    memcpy(&header.bodyLength, headerBuffer + offset, sizeof(header.bodyLength));
-    offset += sizeof(header.bodyLength);
-}
-
-void ControlApp::connectToServer() {
-    bool allConnected = true;
-
-    for (size_t i = 0; i < backends.size(); ++i) {
-        uint32_t prevCounter = messageCounter;
-        try {
-            // Create socket
-            backends[i].sockets[0] = std::make_shared<tcp::socket>(*io_context);
-            
-            // Resolve endpoint
-            tcp::endpoint endpoint(to_address(backends[i].host), backends[i].ports[0]);
-            
-            // Connect synchronously
-            backends[i].sockets[0]->connect(endpoint);
-
-            // Store socket
-            backends[i].ready = true;
-            statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Connected"));
-            statusLabels[i]->setStyleSheet("color: green; font-size: 32px;");
-
-        } catch (const std::exception& e) {
-            std::cerr << "Error with " << backends[i].name << ":" 
-                      << backends[i].ports[0] << ": " << e.what() << std::endl;
-            allConnected = false;
-            statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Not Connected"));
-            statusLabels[i]->setStyleSheet("color: red; font-size: 32px;");
-            messageCounter = prevCounter;
-            continue;
-        }
-    }
-
-    if (allConnected) {
-        statusTimer->stop();
-        eventSent = false;
-        eventBtn->setEnabled(true);
-        toggleBtn->setEnabled(true);
-
-        // Connect second sockets
-        int idx = 0;
-        for (auto& backend : backends) {
-            try {
-                backend.sockets[1] = std::make_shared<tcp::socket>(*io_context);
-                tcp::endpoint endpoint(to_address(backend.host), backend.ports[1]);
-                
-                // Connect synchronously
-                backend.sockets[1]->connect(endpoint);
-                sendLoggingMessage(MessageType::CONFIG_INFO, backend, idx++);
-            } catch (const std::exception& e) {
-                std::cerr << "Error connecting to second port: " << e.what() << std::endl;
-            }
-        }
-        std::cout << "All backends connected successfully" << std::endl;
-    }
-}
-
-void ControlApp::writeHeader(Backend& backend, MessageType msgType) {
-    char* headerBuffer = new char[22];
-    Header sendHeader = setHeader(msgType);
-    int offset = 0;
-
-    memcpy(headerBuffer + offset, &sendHeader.timestamp, sizeof(sendHeader.timestamp));
-    offset += sizeof(sendHeader.timestamp);
-    memcpy(headerBuffer + offset, &sendHeader.messageType, sizeof(sendHeader.messageType));
-    offset += sizeof(sendHeader.messageType);
-    memcpy(headerBuffer + offset, &sendHeader.sequenceNumber, sizeof(sendHeader.sequenceNumber));
-    offset += sizeof(sendHeader.sequenceNumber);
-    memcpy(headerBuffer + offset, &sendHeader.bodyLength, sizeof(sendHeader.bodyLength));
-    offset += sizeof(sendHeader.bodyLength);
-
-    boost::asio::write(*backend.sockets[0], boost::asio::buffer(headerBuffer, 22));
-}
-
-Protocol_Header ControlApp::getReceivedHeader(Backend& backend, int idx) {
-    usleep(300000);
-    char* headerBuffer = new char[sizeof(Protocol_Header)];
-    int offset = 0;
-
-    auto executor = backend.sockets[0]->get_executor();
-    auto handler = [this, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
-        if (error) {
-            std::cerr << "Async read error: " << error.message() << std::endl;
-        }
-    };
-
-    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, sizeof(Protocol_Header)),
-        boost::asio::bind_executor(executor, handler));
-    
-    Protocol_Header receivedHeader = *reinterpret_cast<Protocol_Header*>(headerBuffer);
-    std::cout << "============ Header Info =============" << std::endl;
-    std::cout << "Timestamp: " << receivedHeader.timestamp << std::endl;
-    std::cout << "Message Type: " << receivedHeader.messageType << std::endl;
-    std::cout << "Sequence Number: " << receivedHeader.sequenceNumber << std::endl;
-    std::cout << "Body Length: " << receivedHeader.bodyLength << std::endl;
-    std::cout << "=======================================" << std::endl;
-    
-    char* bodyBuffer = new char[receivedHeader.bodyLength];
-    offset = 0;
-    memset(bodyBuffer, 0, receivedHeader.bodyLength);
-    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(bodyBuffer, receivedHeader.bodyLength),
-        boost::asio::bind_executor(executor, handler));
-
-    std::cout << "============ Body Info =============" << std::endl;
-    std::cout << "Body: " << bodyBuffer << std::endl;
-    std::cout << "====================================" << std::endl;
-
-    return receivedHeader;
-}
-
-void ControlApp::applyConfiguration() {
-    bool allValid = true;
-    std::string errorMessage;
-
-    for (size_t i = 0; i < backends.size(); ++i) {
-        QString ip = ipInputs[i]->text().trimmed();
-        QString port1 = portInputs1[i]->text().trimmed();
-        QString port2 = portInputs2[i]->text().trimmed();
-        
-        // Check if IP is empty
-        if (ip.isEmpty()) {
-            errorMessage = backends[i].name + ": IP address cannot be empty";
-            allValid = false;
-            break;
-        }
-
-        // Validate IP format
-        QRegExp ipRegex("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$");
-        if (!ipRegex.exactMatch(ip)) {
-            errorMessage = backends[i].name + ": Invalid IP address format";
-            allValid = false;
-            break;
-        }
-
-        // Validate ports
-        bool ok1, ok2;
-        int portNum1 = port1.toInt(&ok1);
-        int portNum2 = port2.toInt(&ok2);
-        
-        if (!ok1 || !ok2 || portNum1 < 1 || portNum1 > 65535 || portNum2 < 1 || portNum2 > 65535) {
-            errorMessage = backends[i].name + ": Invalid port number (must be between 1 and 65535)";
-            allValid = false;
-            break;
-        }
-
-        // Check if configuration has changed
-        if (ip.toStdString() == backends[i].host && 
-            portNum1 == backends[i].ports[0] && 
-            portNum2 == backends[i].ports[1]) {
-            continue;  // Skip if configuration hasn't changed
-        }
-
-        // Update configuration
-        backends[i].host = ip.toStdString();
-        backends[i].ports[0] = portNum1;
-        backends[i].ports[1] = portNum2;
-        cleanupSockets();
-    }
-
-    if (!allValid) {
-        QMessageBox::warning(this, "Configuration Error", QString::fromStdString(errorMessage));
-        return;
-    }
-
-    // Reconnect to servers with new configuration
-    connectToServer();
-    QMessageBox::information(this, "Success", "Configuration applied successfully");
-}
-
 void ControlApp::toggleAction() {
     if (!isToggleOn) {  // Sending START
         std::vector<bool> results;
@@ -516,6 +337,141 @@ void ControlApp::centerWindow() {
     move(x, y);
 }
 
+void ControlApp::applyConfiguration() {
+    bool allValid = true;
+    std::string errorMessage;
+
+    for (size_t i = 0; i < backends.size(); ++i) {
+        QString ip = ipInputs[i]->text().trimmed();
+        QString port1 = portInputs1[i]->text().trimmed();
+        QString port2 = portInputs2[i]->text().trimmed();
+        
+        // Check if IP is empty
+        if (ip.isEmpty()) {
+            errorMessage = backends[i].name + ": IP address cannot be empty";
+            allValid = false;
+            break;
+        }
+
+        // Validate IP format
+        QRegExp ipRegex("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$");
+        if (!ipRegex.exactMatch(ip)) {
+            errorMessage = backends[i].name + ": Invalid IP address format";
+            allValid = false;
+            break;
+        }
+
+        // Validate ports
+        bool ok1, ok2;
+        int portNum1 = port1.toInt(&ok1);
+        int portNum2 = port2.toInt(&ok2);
+        
+        if (!ok1 || !ok2 || portNum1 < 1 || portNum1 > 65535 || portNum2 < 1 || portNum2 > 65535) {
+            errorMessage = backends[i].name + ": Invalid port number (must be between 1 and 65535)";
+            allValid = false;
+            break;
+        }
+
+        // Check if configuration has changed
+        if (ip.toStdString() == backends[i].host && 
+            portNum1 == backends[i].ports[0] && 
+            portNum2 == backends[i].ports[1]) {
+            continue;  // Skip if configuration hasn't changed
+        }
+
+        // Update configuration
+        backends[i].host = ip.toStdString();
+        backends[i].ports[0] = portNum1;
+        backends[i].ports[1] = portNum2;
+        cleanupSockets();
+    }
+
+    if (!allValid) {
+        QMessageBox::warning(this, "Configuration Error", QString::fromStdString(errorMessage));
+        return;
+    }
+
+    // Reconnect to servers with new configuration
+    connectToServer();
+    QMessageBox::information(this, "Success", "Configuration applied successfully");
+}
+
+void ControlApp::connectToServer() {
+    bool allConnected = true;
+
+    for (size_t i = 0; i < backends.size(); ++i) {
+        uint32_t prevCounter = messageCounter;
+        try {
+            // Create socket
+            backends[i].sockets[0] = std::make_shared<tcp::socket>(*io_context);
+            
+            // Resolve endpoint
+            tcp::endpoint endpoint(to_address(backends[i].host), backends[i].ports[0]);
+            
+            // Connect synchronously
+            backends[i].sockets[0]->connect(endpoint);
+
+            // Store socket
+            backends[i].ready = true;
+            statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Connected"));
+            statusLabels[i]->setStyleSheet("color: green; font-size: 32px;");
+
+        } catch (const std::exception& e) {
+            std::cerr << "Error with " << backends[i].name << ":" 
+                      << backends[i].ports[0] << ": " << e.what() << std::endl;
+            allConnected = false;
+            statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Not Connected"));
+            statusLabels[i]->setStyleSheet("color: red; font-size: 32px;");
+            messageCounter = prevCounter;
+            continue;
+        }
+    }
+
+    if (allConnected) {
+        statusTimer->stop();
+        eventSent = false;
+        eventBtn->setEnabled(true);
+        toggleBtn->setEnabled(true);
+
+        // Connect second sockets
+        int idx = 0;
+        for (auto& backend : backends) {
+            try {
+                backend.sockets[1] = std::make_shared<tcp::socket>(*io_context);
+                tcp::endpoint endpoint(to_address(backend.host), backend.ports[1]);
+                
+                // Connect synchronously
+                backend.sockets[1]->connect(endpoint);
+                sendLoggingMessage(MessageType::CONFIG_INFO, backend, idx++);
+            } catch (const std::exception& e) {
+                std::cerr << "Error connecting to second port: " << e.what() << std::endl;
+            }
+        }
+        std::cout << "All backends connected successfully" << std::endl;
+    }
+}
+
+void ControlApp::cleanupSockets() {
+    for (auto& backend : backends) {
+        for (auto& socket : backend.sockets) {
+            if (socket && socket->is_open()) {
+                try {
+                    socket->close();
+                } catch (const std::exception& e) {
+                    std::cerr << "Error closing socket: " << e.what() << std::endl;
+                }
+                socket = nullptr;
+            }
+        }
+        backend.ready = false;
+    }
+}
+
+void ControlApp::closeEvent(QCloseEvent* event) {
+    cleanupSockets();
+    event->accept();
+} 
+
 Header ControlApp::setHeader(uint8_t messageType) {
     Header header;
     header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -531,38 +487,85 @@ Header ControlApp::setHeader(uint8_t messageType) {
     return header;
 }
 
-bool ControlApp::setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
-    msg.header = setHeader(messageType);
+void ControlApp::writeHeader(Backend& backend, MessageType msgType) {
+    char* headerBuffer = new char[22];
+    Header sendHeader = setHeader(msgType);
+    int offset = 0;
 
-    std::vector<stLoggingFile> loggingFileList;
-    stLoggingFile loggingFile;
-    loggingFile.id = 0;
-    loggingFile.enable = "true";
-    loggingFile.namePrefix = "logging";
-    loggingFile.nameSubfix = "";
-    loggingFile.extension = ".log";
-    loggingFileList.push_back(loggingFile);
+    memcpy(headerBuffer + offset, &sendHeader.timestamp, sizeof(sendHeader.timestamp));
+    offset += sizeof(sendHeader.timestamp);
+    memcpy(headerBuffer + offset, &sendHeader.messageType, sizeof(sendHeader.messageType));
+    offset += sizeof(sendHeader.messageType);
+    memcpy(headerBuffer + offset, &sendHeader.sequenceNumber, sizeof(sendHeader.sequenceNumber));
+    offset += sizeof(sendHeader.sequenceNumber);
+    memcpy(headerBuffer + offset, &sendHeader.bodyLength, sizeof(sendHeader.bodyLength));
+    offset += sizeof(sendHeader.bodyLength);
 
-    stMetaData metaData;
-    metaData.data["control_app"] = "control_app";
-    metaData.issue = "control_app";
+    boost::asio::write(*backend.sockets[0], boost::asio::buffer(headerBuffer, 22));
+}
 
-    msg.loggingDirectoryPath = "/home/nvidia/Work/data/logging";
-    msg.loggingMode = 0;
-    msg.historyTime = 1;
-    msg.followTime = 1;
-    msg.splitTime = 1;
-    msg.dataLength = 1;
-    msg.loggingFileList = loggingFileList;
-    msg.metaData = metaData;
+void ControlApp::parseHeader(char* headerBuffer, Header& header) {
+    int offset = 0;
+    memcpy(&header.timestamp, headerBuffer + offset, sizeof(header.timestamp));
+    offset += sizeof(header.timestamp);
+    memcpy(&header.messageType, headerBuffer + offset, sizeof(header.messageType));
+    offset += sizeof(header.messageType);
+    memcpy(&header.sequenceNumber, headerBuffer + offset, sizeof(header.sequenceNumber));
+    offset += sizeof(header.sequenceNumber);
+    memcpy(&header.bodyLength, headerBuffer + offset, sizeof(header.bodyLength));
+    offset += sizeof(header.bodyLength);
+}
+
+Protocol_Header ControlApp::getReceivedHeader(Backend& backend, int idx) {
+    usleep(300000);
+    char* headerBuffer = new char[sizeof(Protocol_Header)];
+    int offset = 0;
+    auto executor = backend.sockets[0]->get_executor();
+    auto handler = [this, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
+        if (error) {
+            std::cerr << "Async read error: " << error.message() << std::endl;
+        }
+    };
+
+    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(headerBuffer, sizeof(Protocol_Header)),
+        boost::asio::bind_executor(executor, handler));
     
+    Protocol_Header receivedHeader = *reinterpret_cast<Protocol_Header*>(headerBuffer);
+    std::cout << "============ Header Info =============" << std::endl;
+    std::cout << "Timestamp: " << receivedHeader.timestamp << std::endl;
+    std::cout << "Message Type: " << receivedHeader.messageType << std::endl;
+    std::cout << "Sequence Number: " << receivedHeader.sequenceNumber << std::endl;
+    std::cout << "Body Length: " << receivedHeader.bodyLength << std::endl;
+    std::cout << "=======================================" << std::endl;
+    
+    char* bodyBuffer = new char[receivedHeader.bodyLength];
+    offset = 0;
+    memset(bodyBuffer, 0, receivedHeader.bodyLength);
+    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(bodyBuffer, receivedHeader.bodyLength),
+        boost::asio::bind_executor(executor, handler));
+
+    std::cout << "============ Body Info =============" << std::endl;
+    std::cout << "Body: " << bodyBuffer << std::endl;
+    std::cout << "====================================" << std::endl;
+
+    return receivedHeader;
+}
+
+bool ControlApp::setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType) {
+    msg.header = setHeader(messageType);
+    msg.mRequestStatus = 0;
+    msg.mDataType = 1;
+    msg.mSensorChannel = 524288;
+    msg.mServiceID = 0;
+    msg.mNetworkID = 0;
+
     return true;
 }
 
 bool ControlApp::sendDataRequestMessage(Backend& backend, int idx) {
     Header header = setHeader(MessageType::DATA_SEND_REQUEST);
     stDataRequestMsg msg;
-    setTCPMessage(msg, MessageType::DATA_SEND_REQUEST);
+    setDataRequestMessage(msg, MessageType::DATA_SEND_REQUEST);
     char* headerBuffer = new char[21];
     int offset = 0;
     auto executor = backend.sockets[0]->get_executor();
@@ -609,6 +612,34 @@ bool ControlApp::sendDataRequestMessage(Backend& backend, int idx) {
 
     delete[] headerBuffer;
     delete[] bodyBuffer;
+    return true;
+}
+
+bool ControlApp::setRecordConfigMessage(stDataRecordConfigMsg& msg, uint8_t messageType) {
+    msg.header = setHeader(messageType);
+
+    std::vector<stLoggingFile> loggingFileList;
+    stLoggingFile loggingFile;
+    loggingFile.id = 0;
+    loggingFile.enable = "true";
+    loggingFile.namePrefix = "logging";
+    loggingFile.nameSubfix = "";
+    loggingFile.extension = ".log";
+    loggingFileList.push_back(loggingFile);
+
+    stMetaData metaData;
+    metaData.data["control_app"] = "control_app";
+    metaData.issue = "control_app";
+
+    msg.loggingDirectoryPath = "/home/nvidia/Work/data/logging";
+    msg.loggingMode = 0;
+    msg.historyTime = 1;
+    msg.followTime = 1;
+    msg.splitTime = 1;
+    msg.dataLength = 1;
+    msg.loggingFileList = loggingFileList;
+    msg.metaData = metaData;
+    
     return true;
 }
 
@@ -684,35 +715,3 @@ bool ControlApp::sendLoggingMessage(uint8_t messageType, Backend& backend, int i
     }
     return true;
 }
-
-bool ControlApp::setTCPMessage(stDataRequestMsg& msg, uint8_t messageType) {
-    msg.header = setHeader(messageType);
-    msg.mRequestStatus = 0;
-    msg.mDataType = eDataType::SENSOR;
-    msg.mSensorChannel = getSensorChannelBitmask(eSensorChannel::CAMERA_FRONT);
-    msg.mServiceID = 0;
-    msg.mNetworkID = 0;
-
-    return true;
-}
-
-void ControlApp::cleanupSockets() {
-    for (auto& backend : backends) {
-        for (auto& socket : backend.sockets) {
-            if (socket && socket->is_open()) {
-                try {
-                    socket->close();
-                } catch (const std::exception& e) {
-                    std::cerr << "Error closing socket: " << e.what() << std::endl;
-                }
-                socket = nullptr;
-            }
-        }
-        backend.ready = false;
-    }
-}
-
-void ControlApp::closeEvent(QCloseEvent* event) {
-    cleanupSockets();
-    event->accept();
-} 
