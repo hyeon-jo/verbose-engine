@@ -36,6 +36,6 @@ private:
     std::vector<Backend> backends;
     std::shared_ptr<boost::asio::io_context> io_context;
     uint32_t messageCounter;
-    int sendStatus = 0;
+    int sendStatus = 1;
     ControlApp* controlApp;
 }; 

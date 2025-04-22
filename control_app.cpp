@@ -9,7 +9,7 @@
 #include <atomic>
 
 ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent), 
-    isToggleOn(false), eventSent(false), messageCounter(0) {
+    isToggleOn(false), eventSent(false), messageCounter(0), serverConnected(false) {
     
     tcpClient = new TcpClient(this);
     setupUI();
@@ -26,24 +26,6 @@ ControlApp::ControlApp(QWidget* parent) : QMainWindow(parent),
     imageViewer = new ImageViewer(nullptr);
     imageViewer->setWindowFlags(Qt::Window);
     imageViewer->show();
-
-    // Initialize data threads
-    dataThread = std::thread([this]() {
-        while (!stopDataThread) {
-            if (isToggleOn) {
-                tcpClient->sendData();
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-        }
-    });
-
-    receiveThread = std::thread([this]() {
-        while (!stopReceiveThread) {
-            if (isToggleOn) {
-                tcpClient->receiveData();
-            }
-        }
-    });
 }
 
 ControlApp::~ControlApp() {
@@ -389,6 +371,27 @@ void ControlApp::connectToServer() {
             statusLabels[i]->setText(QString::fromStdString(backends[i].name + ": Connected"));
             statusLabels[i]->setStyleSheet("color: green; font-size: 32px;");
         }
+
+        // Initialize data threads
+        dataThread = std::thread([this]() {
+            while (!stopDataThread || !serverConnected) {
+                if (serverConnected) {
+                    tcpClient->sendData();
+                    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    break;
+                }
+            }
+        });
+
+        receiveThread = std::thread([this]() {
+            while (!stopReceiveThread || !serverConnected) {
+                if (serverConnected) {
+                    tcpClient->receiveData();
+                    break;
+                }
+            }
+        });
+
     } else {
         auto& backends = tcpClient->getBackends();
         for (size_t i = 0; i < backends.size(); ++i) {

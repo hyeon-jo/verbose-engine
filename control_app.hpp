@@ -66,6 +66,7 @@ private:
     bool isToggleOn;
     bool eventSent;
     uint32_t messageCounter;
+    bool serverConnected;
 
     std::thread dataThread;
     std::thread receiveThread;

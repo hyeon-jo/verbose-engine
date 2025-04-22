@@ -102,11 +102,13 @@ Header TcpClient::setHeader(uint8_t messageType) {
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
     header.messageType = messageType;
-    if (messageType == MessageType::DATA_SEND_REQUEST) {
-        messageCounter++;
-    }
     header.sequenceNumber = messageCounter;
     header.bodyLength = 1;
+
+    if (messageType == MessageType::DATA_SEND_REQUEST) {
+        messageCounter++;
+        header.bodyLength = 8;
+    }
 
     return header;
 }
@@ -141,7 +143,7 @@ void TcpClient::parseHeader(char* headerBuffer, Header& header) {
 }
 
 Protocol_Header TcpClient::getReceivedHeader(Backend& backend, int idx) {
-    usleep(300000);
+    usleep(10000);
     char* headerBuffer = new char[sizeof(Protocol_Header)];
     int offset = 0;
     auto executor = backend.sockets[0]->get_executor();
@@ -157,7 +159,7 @@ Protocol_Header TcpClient::getReceivedHeader(Backend& backend, int idx) {
     Protocol_Header receivedHeader = *reinterpret_cast<Protocol_Header*>(headerBuffer);
     std::cout << "============ Header Info =============" << std::endl;
     std::cout << "Timestamp: " << receivedHeader.timestamp << std::endl;
-    std::cout << "Message Type: " << receivedHeader.messageType << std::endl;
+    std::cout << "Message Type: " << static_cast<int>(receivedHeader.messageType) << std::endl;
     std::cout << "Sequence Number: " << receivedHeader.sequenceNumber << std::endl;
     std::cout << "Body Length: " << receivedHeader.bodyLength << std::endl;
     std::cout << "=======================================" << std::endl;
@@ -169,7 +171,7 @@ Protocol_Header TcpClient::getReceivedHeader(Backend& backend, int idx) {
         boost::asio::bind_executor(executor, handler));
 
     std::cout << "============ Body Info =============" << std::endl;
-    std::cout << "Body: " << bodyBuffer << std::endl;
+    std::cout << "Body: " << strlen(bodyBuffer) << std::endl;
     std::cout << "====================================" << std::endl;
 
     return receivedHeader;
@@ -187,10 +189,9 @@ bool TcpClient::setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType
 }
 
 bool TcpClient::sendDataRequestMessage(Backend& backend, int idx) {
-    Header header = setHeader(MessageType::DATA_SEND_REQUEST);
     stDataRequestMsg msg;
     setDataRequestMessage(msg, MessageType::DATA_SEND_REQUEST);
-    char* headerBuffer = new char[21];
+    char* headerBuffer = new char[sizeof(stDataRequestMsg)];
     int offset = 0;
     auto executor = backend.sockets[0]->get_executor();
     auto handler = [this, idx](const boost::system::error_code& error, std::size_t bytes_transferred) {
@@ -199,7 +200,7 @@ bool TcpClient::sendDataRequestMessage(Backend& backend, int idx) {
         }
     };
 
-    header.bodyLength = sizeof(msg);
+    auto header = msg.header;
 
     memcpy(headerBuffer + offset, &header.timestamp, sizeof(header.timestamp));
     offset += sizeof(header.timestamp);
@@ -209,33 +210,25 @@ bool TcpClient::sendDataRequestMessage(Backend& backend, int idx) {
     offset += sizeof(header.sequenceNumber);
     memcpy(headerBuffer + offset, &header.bodyLength, sizeof(header.bodyLength));
     offset += sizeof(header.bodyLength);
-    if (backend.ready && backend.sockets[0]->is_open()) {
-        auto& socket = backend.sockets[0];
-        boost::asio::async_write(*socket, boost::asio::buffer(headerBuffer, 21),
-            boost::asio::bind_executor(executor, handler));
-    }
 
-    char* bodyBuffer = new char[header.bodyLength];
-    offset = 0;
-    memcpy(bodyBuffer + offset, &msg.mRequestStatus, sizeof(msg.mRequestStatus));
+    memcpy(headerBuffer + offset, &msg.mRequestStatus, sizeof(msg.mRequestStatus));
     offset += sizeof(msg.mRequestStatus);
-    memcpy(bodyBuffer + offset, &msg.mDataType, sizeof(msg.mDataType));
+    memcpy(headerBuffer + offset, &msg.mDataType, sizeof(msg.mDataType));
     offset += sizeof(msg.mDataType);
-    memcpy(bodyBuffer + offset, &msg.mSensorChannel, sizeof(msg.mSensorChannel));
+    memcpy(headerBuffer + offset, &msg.mSensorChannel, sizeof(msg.mSensorChannel));
     offset += sizeof(msg.mSensorChannel);
-    memcpy(bodyBuffer + offset, &msg.mServiceID, sizeof(msg.mServiceID));
+    memcpy(headerBuffer + offset, &msg.mServiceID, sizeof(msg.mServiceID));
     offset += sizeof(msg.mServiceID);
-    memcpy(bodyBuffer + offset, &msg.mNetworkID, sizeof(msg.mNetworkID));
+    memcpy(headerBuffer + offset, &msg.mNetworkID, sizeof(msg.mNetworkID));
     offset += sizeof(msg.mNetworkID);
-    
+
     if (backend.ready && backend.sockets[0]->is_open()) {
         auto& socket = backend.sockets[0];
-        boost::asio::async_write(*socket, boost::asio::buffer(bodyBuffer, header.bodyLength),
+        boost::asio::async_write(*socket, boost::asio::buffer(headerBuffer, sizeof(stDataRequestMsg)),
             boost::asio::bind_executor(executor, handler));
     }
 
     delete[] headerBuffer;
-    delete[] bodyBuffer;
     return true;
 }
 
@@ -337,20 +330,20 @@ void TcpClient::sendData() {
             for (auto& backend : backends) {
                 writeHeader(backend, MessageType::LINK);
             }
-            sendStatus = 1;
+            sendStatus = 2;
         }
-        else if (sendStatus == 2) {
+        else if (sendStatus == 3) {
             for (auto& backend : backends) {
                 writeHeader(backend, MessageType::REC_INFO);
             }
-            sendStatus = 3;
-            sleep(3);
+            sendStatus = 4;
+            usleep(10000);
 
             int idx = 0;
             for (auto& backend : backends) {
                 sendDataRequestMessage(backend, idx++);
             }
-            sleep(3);
+            usleep(10000);
         }
     }
 }
@@ -390,7 +383,7 @@ std::vector<char*> TcpClient::receiveAll(Backend& backend, const size_t bufferSi
 
 void TcpClient::receiveData() {
     while (true) {
-        if (sendStatus == 1) {
+        if (sendStatus == 2) {
             int idx = 0;
             auto flag = false;
             for (auto& backend : backends) {
@@ -400,16 +393,20 @@ void TcpClient::receiveData() {
                         flag = true;
                     }
                     else {
-                        sendStatus = 2;
+                        sendStatus = 3;
                     }
                 }
             }
             if (!flag) {
                 std::cerr << "Link ACK not received" << std::endl;
-                sendStatus = 0;
+                sendStatus = 1;
+            }
+            else
+            {
+                sendStatus = 3;
             }
         }
-        if (sendStatus == 3) {
+        if (sendStatus == 4) {
             int offset = 7;
             for (auto& backend : backends) {
                 auto executor = backend.sockets[0]->get_executor();
