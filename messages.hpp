@@ -205,8 +205,8 @@ struct stDataRequestMsg
 
 struct stDataSensorReqMsg
 {
-    // uint32_t mSequenceNumber;
-    // uint32_t mTotalNumber;
+    uint32_t mSequenceNumber;
+    uint32_t mTotalNumber;
     uint32_t mCurrentNumber;
     uint32_t mFrameNumber;
     uint64_t mTimestamp;

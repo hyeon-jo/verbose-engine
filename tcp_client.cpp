@@ -102,11 +102,11 @@ Header TcpClient::setHeader(uint8_t messageType) {
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
     header.messageType = messageType;
-    header.sequenceNumber = messageCounter;
+    header.sequenceNumber = messageCounter++;
     header.bodyLength = 1;
 
     if (messageType == MessageType::DATA_SEND_REQUEST) {
-        messageCounter++;
+        // messageCounter++;
         header.bodyLength = 8;
     }
 
@@ -143,7 +143,7 @@ void TcpClient::parseHeader(char* headerBuffer, Header& header) {
 }
 
 Protocol_Header TcpClient::getReceivedHeader(Backend& backend, int idx) {
-    usleep(10000);
+    // usleep(10000);
     char* headerBuffer = new char[sizeof(Protocol_Header)];
     int offset = 0;
     auto executor = backend.sockets[0]->get_executor();
@@ -164,17 +164,32 @@ Protocol_Header TcpClient::getReceivedHeader(Backend& backend, int idx) {
     std::cout << "Body Length: " << receivedHeader.bodyLength << std::endl;
     std::cout << "=======================================" << std::endl;
     
-    char* bodyBuffer = new char[receivedHeader.bodyLength];
-    offset = 0;
-    memset(bodyBuffer, 0, receivedHeader.bodyLength);
-    boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(bodyBuffer, receivedHeader.bodyLength),
-        boost::asio::bind_executor(executor, handler));
-
-    std::cout << "============ Body Info =============" << std::endl;
-    std::cout << "Body: " << strlen(bodyBuffer) << std::endl;
-    std::cout << "====================================" << std::endl;
-
     return receivedHeader;
+}
+
+char* TcpClient::receiveBody(Backend& backend, int idx, int bodyLength) {
+    auto executor = backend.sockets[0]->get_executor();
+    auto handler = [this](const boost::system::error_code& error, std::size_t bytes_transferred) {
+        if (error) {
+            std::cerr << "Async read error: " << error.message() << std::endl;
+        }
+    };
+    if (bodyLength - 1 > 0) {
+        char* bodyBuffer = new char[bodyLength - 1];
+        boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(bodyBuffer, bodyLength - 1),
+            boost::asio::bind_executor(executor, handler));
+
+        std::cout << "============ Body Info =============" << std::endl;
+        std::cout << "Body: " << strlen(bodyBuffer) << std::endl;
+        std::cout << "====================================" << std::endl;
+
+        return bodyBuffer;
+    }
+    else {
+        char* bodyBuffer = new char[1];
+        bodyBuffer[0] = 0;
+        return bodyBuffer;
+    }
 }
 
 bool TcpClient::setDataRequestMessage(stDataRequestMsg& msg, uint8_t messageType) {
@@ -329,21 +344,24 @@ void TcpClient::sendData() {
         if (sendStatus == 1) {
             for (auto& backend : backends) {
                 writeHeader(backend, MessageType::LINK);
+                std::cout << "[SEND] LINK" << std::endl;
             }
             sendStatus = 2;
         }
         else if (sendStatus == 3) {
             for (auto& backend : backends) {
                 writeHeader(backend, MessageType::REC_INFO);
+                std::cout << "[SEND] REC_INFO" << std::endl;
             }
             sendStatus = 4;
-            usleep(10000);
-
+        }
+        else if (sendStatus == 5) {
             int idx = 0;
             for (auto& backend : backends) {
                 sendDataRequestMessage(backend, idx++);
+                std::cout << "[SEND] DATA_SEND_REQUEST" << std::endl;
             }
-            usleep(10000);
+            sendStatus = 6;
         }
     }
 }
@@ -384,10 +402,13 @@ std::vector<char*> TcpClient::receiveAll(Backend& backend, const size_t bufferSi
 void TcpClient::receiveData() {
     while (true) {
         if (sendStatus == 2) {
+            sleep(1);
             int idx = 0;
             auto flag = false;
+            std::cout << "[RECV] LINK_ACK" << std::endl;
             for (auto& backend : backends) {
-                auto header = getReceivedHeader(backend, idx++);
+                auto header = getReceivedHeader(backend, idx);
+                auto body = receiveBody(backend, idx++, header.bodyLength);
                 if (header.messageType == MessageType::LINK_ACK) {
                     if (!flag) {
                         flag = true;
@@ -406,44 +427,30 @@ void TcpClient::receiveData() {
                 sendStatus = 3;
             }
         }
-        if (sendStatus == 4) {
+        else if (sendStatus == 4) {
+            sleep(1);
+            std::cout << "[RECV] REC_INFO_ACK" << std::endl;
             int offset = 7;
+            int idx = 0;
             for (auto& backend : backends) {
-                auto executor = backend.sockets[0]->get_executor();
-                auto handler = [this](const boost::system::error_code& error, std::size_t bytes_transferred) {
-                    if (error) {
-                        std::cerr << "Async read error: " << error.message() << std::endl;
-                    }
-                };
-
-                char *response = new char[22];
-                boost::asio::async_read(*backend.sockets[0], boost::asio::buffer(response, 22),
-                    boost::asio::bind_executor(executor, handler));
-
-                Header header;
-                parseHeader(response, header);
-
-                auto returnData = receiveAll(backend, header.bodyLength, 0);
-                size_t totalSize = 0;
-                for (auto& data : returnData) {
-                    totalSize += strlen(data);
-                }
-                
-                char* recvData = new char[totalSize];
-                size_t currentOffset = 0;
-                for (auto& data : returnData) {
-                    size_t dataSize = strlen(data);
-                    memcpy(recvData + currentOffset, data, dataSize);
-                    currentOffset += dataSize;
-                    delete[] data;
-                }
-                returnData.clear();
+                auto header = getReceivedHeader(backend, idx);
+                auto body = receiveBody(backend, idx++, header.bodyLength);
+            }
+            sendStatus = 5;
+        }
+        else if (sendStatus == 6) {
+            usleep(500000);
+            std::cout << "[RECV] DATA_SENSOR" << std::endl;
+            int idx = 0;
+            for (auto& backend : backends) {
+                auto header = getReceivedHeader(backend, idx);
+                auto body = receiveBody(backend, idx++, header.bodyLength);
 
                 if (header.messageType == MessageType::DATA_SENSOR) {
-                    auto dataSize = sizeof(stDataSensorReqMsg) + 8;
-                    char* dataHeader = new char[dataSize];
-                    memcpy(dataHeader, recvData + offset, dataSize);
-                    stDataSensorReqMsg* dataSensorReqMsg = reinterpret_cast<stDataSensorReqMsg*>(dataHeader);
+                    char* newBody = new char[header.bodyLength];
+                    memcpy(newBody, header.mResult, 1);
+                    memcpy(newBody + 1, body, header.bodyLength - 1);
+                    stDataSensorReqMsg* dataSensorReqMsg = reinterpret_cast<stDataSensorReqMsg*>(newBody);
                     std::cout << "============ Data Sensor Request Message =============" << std::endl;
                     std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mCurrentNumber << std::endl;
                     std::cout << "Data Sensor Request Message: " << dataSensorReqMsg->mFrameNumber << std::endl;
@@ -459,7 +466,7 @@ void TcpClient::receiveData() {
                     std::cout << "=========================================================" << std::endl;
 
                     if (dataSensorReqMsg->mSensorType == 1) {
-                        char* image_buffer = recvData + dataSize + offset;
+                        auto image_buffer = receiveBody(backend, idx, dataSensorReqMsg->mPayloadSize);
                         controlApp->processData(image_buffer, 1, dataSensorReqMsg->mImgWidth, dataSensorReqMsg->mImgHeight);
                     }
                     else if (dataSensorReqMsg->mSensorType == 2) {
