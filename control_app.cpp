@@ -372,6 +372,7 @@ void ControlApp::connectToServer() {
             statusLabels[i]->setStyleSheet("color: green; font-size: 32px;");
         }
 
+        serverConnected = true;
         // Initialize data threads
         dataThread = std::thread([this]() {
             while (!stopDataThread || !serverConnected) {

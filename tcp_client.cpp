@@ -399,7 +399,7 @@ void TcpClient::receiveData() {
             }
             if (!flag) {
                 std::cerr << "Link ACK not received" << std::endl;
-                sendStatus = 1;
+                // sendStatus = 1;
             }
             else
             {
